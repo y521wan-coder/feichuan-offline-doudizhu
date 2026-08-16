@@ -1,0 +1,51 @@
+﻿# Build directories
+build/
+build2/
+out/
+cmake-build-*/
+portable/
+Qt/
+reference/
+
+# Visual Studio
+.vs/
+*.suo
+*.user
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+compile_commands.json
+
+# Qt auto-generated
+moc_*.cpp
+ui_*.h
+qrc_*.cpp
+
+# Binaries
+*.exe
+*.dll
+*.obj
+*.o
+*.lib
+*.pdb
+*.ilk
+
+# User data
+saves/
+logs/
+statistics.json
+settings.json
+
+# IDE
+.idea/
+*.swp
+
+# OS
+Thumbs.db
+Desktop.ini
+
+# Temp files
+test_*.cpp
+test_*.txt

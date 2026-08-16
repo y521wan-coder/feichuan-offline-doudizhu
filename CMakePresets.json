@@ -1,0 +1,50 @@
+﻿{
+    "version": 6,
+    "configurePresets": [
+        {
+            "name": "base",
+            "hidden": true,
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build/${presetName}",
+            "environment": {
+                "VSLANG": "1033"
+            },
+            "cacheVariables": {
+                "CMAKE_PREFIX_PATH": "${sourceDir}/Qt/6.8.3/msvc2022_64"
+            }
+        },
+        {
+            "name": "debug-x64",
+            "displayName": "Debug x64",
+            "inherits": "base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug"
+            }
+        },
+        {
+            "name": "release-x64",
+            "displayName": "Release x64",
+            "inherits": "base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release"
+            }
+        },
+        {
+            "name": "relwithdebinfo-x64",
+            "displayName": "RelWithDebInfo x64",
+            "inherits": "base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "RelWithDebInfo"
+            }
+        }
+    ],
+    "buildPresets": [
+        { "name": "debug-x64", "configurePreset": "debug-x64" },
+        { "name": "release-x64", "configurePreset": "release-x64" },
+        { "name": "relwithdebinfo-x64", "configurePreset": "relwithdebinfo-x64" }
+    ],
+    "testPresets": [
+        { "name": "debug-x64", "configurePreset": "debug-x64", "output": {"outputOnFailure": true} },
+        { "name": "release-x64", "configurePreset": "release-x64", "output": {"outputOnFailure": true} }
+    ]
+}
