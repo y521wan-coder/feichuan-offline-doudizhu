@@ -1,4 +1,4 @@
-﻿cmake_minimum_required(VERSION 3.24)
+cmake_minimum_required(VERSION 3.24)
 
 file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/version.txt" FPDZ_VERSION LIMIT_COUNT 1)
 string(STRIP "${FPDZ_VERSION}" FPDZ_VERSION)
@@ -8,6 +8,11 @@ project(FeichuanOfflineDoudizhu
     DESCRIPTION "Four Player Doudizhu - Accessible Windows Desktop Game"
     LANGUAGES CXX
 )
+if(PROJECT_VERSION_PATCH STREQUAL "")
+    set(FPDZ_VERSION_PATCH 0)
+else()
+    set(FPDZ_VERSION_PATCH ${PROJECT_VERSION_PATCH})
+endif()
 
 if(MSVC)
     set(CMAKE_CXX_CL_SHOWINCLUDES_PREFIX "注意: 包含文件:  ")
@@ -136,6 +141,15 @@ add_executable(FeichuanOfflineDoudizhu
     src/main.cpp
     assets/app.qrc
 )
+if(WIN32)
+    set(FPDZ_FILE_DESCRIPTION "飞船单机斗地主")
+    set(FPDZ_INTERNAL_NAME "FeichuanOfflineDoudizhu")
+    set(FPDZ_ORIGINAL_FILENAME "飞船单机斗地主.exe")
+    configure_file(cmake/windows_version.rc.in
+        "${CMAKE_CURRENT_BINARY_DIR}/generated/game_version.rc" @ONLY)
+    target_sources(FeichuanOfflineDoudizhu PRIVATE
+        "${CMAKE_CURRENT_BINARY_DIR}/generated/game_version.rc")
+endif()
 target_link_libraries(FeichuanOfflineDoudizhu PRIVATE
     fpdz_app fpdz_ui fpdz_core fpdz_ai fpdz_persistence fpdz_accessibility
     Qt6::Core Qt6::Widgets winmm.lib
@@ -185,12 +199,22 @@ add_executable(FeichuanOfflineDoudizhuUpdater
     apps/updater/update_service.h
     apps/updater/signature_verifier.cpp
     apps/updater/signature_verifier.h
+    apps/updater/updater.qrc
 )
+if(WIN32)
+    set(FPDZ_FILE_DESCRIPTION "飞船单机斗地主更新器")
+    set(FPDZ_INTERNAL_NAME "FeichuanOfflineDoudizhuUpdater")
+    set(FPDZ_ORIGINAL_FILENAME "飞船单机斗地主更新器.exe")
+    configure_file(cmake/windows_version.rc.in
+        "${CMAKE_CURRENT_BINARY_DIR}/generated/updater_version.rc" @ONLY)
+    target_sources(FeichuanOfflineDoudizhuUpdater PRIVATE
+        "${CMAKE_CURRENT_BINARY_DIR}/generated/updater_version.rc")
+endif()
 target_include_directories(FeichuanOfflineDoudizhuUpdater PRIVATE
     "${CMAKE_SOURCE_DIR}/apps/updater"
 )
 target_link_libraries(FeichuanOfflineDoudizhuUpdater PRIVATE
-    Qt6::Core Qt6::Widgets Qt6::Network wintrust crypt32
+    Qt6::Core Qt6::Widgets Qt6::Network crypt32 bcrypt
 )
 target_compile_definitions(FeichuanOfflineDoudizhuUpdater PRIVATE
     FPDZ_APP_VERSION="${FPDZ_VERSION}"

@@ -1,0 +1,6 @@
+<!DOCTYPE RCC>
+<RCC version="1.0">
+    <qresource prefix="/update">
+        <file alias="release-signing-public.pem">../../assets/update/release-signing-public.pem</file>
+    </qresource>
+</RCC>

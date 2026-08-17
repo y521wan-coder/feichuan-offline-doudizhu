@@ -1,8 +1,8 @@
 #include "update_service.h"
-#include "signature_verifier.h"
 
 #include <QCoreApplication>
 #include <QDir>
+#include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QNetworkReply>
@@ -19,12 +19,19 @@ constexpr auto kUpdateEndpoint = "https://update.327802521.xyz/api/v1/updates/ch
 constexpr auto kProductKey = "feichuan_offline_doudizhu";
 constexpr auto kPlatform = "windows";
 constexpr auto kChannel = "stable";
+constexpr auto kSignatureAlgorithm = "rsa-pkcs1-sha256";
+constexpr int kSignaturePayloadVersion = 1;
 constexpr int kCheckTimeoutMilliseconds = 15000;
 constexpr int kDownloadTimeoutMilliseconds = 120000;
 
 QString responseError(const QJsonObject& root, const QString& fallback) {
     const QString message = root.value(QStringLiteral("message")).toString().trimmed();
     return message.isEmpty() ? fallback : message;
+}
+
+bool isLowerHexSha256(const QByteArray& value) {
+    static const QRegularExpression pattern(QStringLiteral("^[0-9a-f]{64}$"));
+    return pattern.match(QString::fromLatin1(value)).hasMatch();
 }
 
 } // namespace
@@ -86,15 +93,41 @@ UpdateCheckResult UpdateService::parseCheckResponse(const QByteArray& payload) {
 
     result.downloadUrl = QUrl(data.value(QStringLiteral("download_url")).toString().trimmed());
     result.sha256 = data.value(QStringLiteral("sha256")).toString().trimmed().toLatin1().toLower();
-    static const QRegularExpression shaPattern(QStringLiteral("^[0-9a-fA-F]{64}$"));
+    result.signatureAlgorithm = data.value(QStringLiteral("signature_algorithm")).toString().trimmed();
+    result.signaturePayloadVersion = data.value(QStringLiteral("signature_payload_version")).toInt(0);
+    result.signingKeyId = data.value(QStringLiteral("signing_key_id")).toString().trimmed().toLower();
+    const QByteArray encodedSignature =
+        data.value(QStringLiteral("signature")).toString().trimmed().toLatin1();
+    result.signature = QByteArray::fromBase64(
+        encodedSignature, QByteArray::AbortOnBase64DecodingErrors);
+
     if (result.latestVersion.isEmpty() || !result.downloadUrl.isValid() ||
-        result.downloadUrl.scheme() != QStringLiteral("https") ||
-        !shaPattern.match(QString::fromLatin1(result.sha256)).hasMatch()) {
+        result.downloadUrl.scheme() != QStringLiteral("https") || result.fileSize <= 0 ||
+        !isLowerHexSha256(result.sha256) ||
+        result.signatureAlgorithm != QString::fromLatin1(kSignatureAlgorithm) ||
+        result.signaturePayloadVersion != kSignaturePayloadVersion ||
+        !isLowerHexSha256(result.signingKeyId.toLatin1()) ||
+        result.signature.size() != 384) {
         result.errorMessage = QString::fromUtf8(u8"更新信息不完整或不安全，已停止更新。");
         return result;
     }
     result.success = true;
     return result;
+}
+
+ReleaseSignatureData UpdateService::signatureDataForUpdate(const UpdateCheckResult& update) {
+    ReleaseSignatureData data;
+    data.productKey = QString::fromLatin1(kProductKey);
+    data.platform = QString::fromLatin1(kPlatform);
+    data.channel = QString::fromLatin1(kChannel);
+    data.version = update.latestVersion;
+    data.fileSize = update.fileSize;
+    data.sha256 = update.sha256;
+    data.algorithm = update.signatureAlgorithm;
+    data.payloadVersion = update.signaturePayloadVersion;
+    data.signingKeyId = update.signingKeyId;
+    data.signature = update.signature;
+    return data;
 }
 
 void UpdateService::checkForUpdates(const QString& currentVersion) {
@@ -127,7 +160,8 @@ void UpdateService::downloadAndVerify(const UpdateCheckResult& update) {
     if (m_downloadReply) return;
     if (!update.success || !update.updateAvailable ||
         update.downloadUrl.scheme() != QStringLiteral("https") ||
-        update.sha256.size() != 64) {
+        update.fileSize <= 0 || !isLowerHexSha256(update.sha256) ||
+        update.signature.size() != 384) {
         emit downloadFinished({}, QString::fromUtf8(u8"更新信息无效，不能下载安装包。"));
         return;
     }
@@ -147,7 +181,7 @@ void UpdateService::downloadAndVerify(const UpdateCheckResult& update) {
         return;
     }
     m_downloadHash.reset();
-    m_expectedSha256 = update.sha256.toLower();
+    m_expectedSignatureData = signatureDataForUpdate(update);
 
     QNetworkRequest request(update.downloadUrl);
     request.setHeader(QNetworkRequest::UserAgentHeader,
@@ -188,15 +222,27 @@ void UpdateService::downloadAndVerify(const UpdateCheckResult& update) {
             finishDownloadWithError(QString::fromUtf8(u8"更新安装包下载失败：") + detail);
             return;
         }
+        const qint64 actualFileSize = QFileInfo(m_downloadPath).size();
+        if (actualFileSize != m_expectedSignatureData.fileSize) {
+            finishDownloadWithError(QString::fromUtf8(u8"更新安装包文件大小校验失败，已禁止执行。"));
+            return;
+        }
         const QByteArray actualSha256 = m_downloadHash.result().toHex().toLower();
-        if (actualSha256 != m_expectedSha256) {
+        if (actualSha256 != m_expectedSignatureData.sha256) {
             finishDownloadWithError(QString::fromUtf8(u8"更新安装包 SHA-256 校验失败，已禁止执行。"));
             return;
         }
+
+        QFile publicKeyFile(QStringLiteral(":/update/release-signing-public.pem"));
+        if (!publicKeyFile.open(QIODevice::ReadOnly)) {
+            finishDownloadWithError(QString::fromUtf8(u8"更新器缺少固定发布公钥，已禁止执行。"));
+            return;
+        }
         QString signatureError;
-        if (!verifyDeveloperSignature(m_downloadPath, &signatureError)) {
+        if (!verifyReleaseSignature(m_expectedSignatureData, publicKeyFile.readAll(),
+                                    &signatureError)) {
             finishDownloadWithError(
-                QString::fromUtf8(u8"更新安装包数字签名验证失败，已禁止执行：") +
+                QString::fromUtf8(u8"更新安装包发布签名验证失败，已禁止执行：") +
                 signatureError);
             return;
         }
@@ -217,7 +263,7 @@ void UpdateService::clearDownloadState(bool removeFile) {
     m_downloadReply = nullptr;
     if (removeFile && !m_downloadPath.isEmpty()) QFile::remove(m_downloadPath);
     m_downloadPath.clear();
-    m_expectedSha256.clear();
+    m_expectedSignatureData = {};
     m_downloadHash.reset();
 }
 

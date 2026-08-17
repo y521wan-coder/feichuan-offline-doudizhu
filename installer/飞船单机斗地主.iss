@@ -1,4 +1,4 @@
-#define AppName "飞船单机斗地主"
+﻿#define AppName "飞船单机斗地主"
 #define AppPublisher "飞船"
 #define AppExeName "飞船单机斗地主.exe"
 
@@ -39,6 +39,7 @@ VersionInfoProductName={#AppName}
 VersionInfoDescription={#AppName} 安装程序
 VersionInfoCompany={#AppPublisher}
 SetupMutex=FeichuanOfflineDoudizhuInstallerMutex
+InfoBeforeFile={#SourceDir}\docs\飞船单机斗地主免费版与隐私说明.txt
 
 [Languages]
 Name: "chinesesimp"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"

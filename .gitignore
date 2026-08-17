@@ -50,3 +50,7 @@ Desktop.ini
 # Temp files (repository tests are intentionally tracked)
 *.tmp
 aqtinstall.log
+__pycache__/
+*.pyc
+releases/*.release-manifest.json
+releases/*.sha256.txt

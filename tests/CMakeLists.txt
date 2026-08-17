@@ -1,4 +1,4 @@
-﻿# tests/CMakeLists.txt - Test configuration
+# tests/CMakeLists.txt - Test configuration
 
 find_package(Qt6 REQUIRED COMPONENTS Test)
 
@@ -46,10 +46,13 @@ fpdz_add_test(test_update_service
     SOURCES updater/test_update_service.cpp
             ${CMAKE_SOURCE_DIR}/apps/updater/update_service.cpp
             ${CMAKE_SOURCE_DIR}/apps/updater/signature_verifier.cpp
-    LIBS Qt6::Widgets Qt6::Network wintrust crypt32
+    LIBS Qt6::Widgets Qt6::Network crypt32 bcrypt
 )
 target_include_directories(test_update_service PRIVATE
     "${CMAKE_SOURCE_DIR}/apps/updater"
+)
+target_compile_definitions(test_update_service PRIVATE
+    FPDZ_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
 )
 
 fpdz_add_test(test_card
