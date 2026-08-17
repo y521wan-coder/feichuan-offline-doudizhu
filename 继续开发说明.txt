@@ -57,7 +57,7 @@
 以 AGENTS.md、docs/规则规格.md 和 docs/AI协作规则.md 为准。不得读取其他玩家暗牌、真实底牌或洗牌未来信息；三个等级必须共享相同团队强制规则；叫分期间底牌必须隐藏；游戏主程序不得链接 Qt Network。
 
 9. 最近 Git 提交
-ee322a6 chore: migrate owned offline game baseline。本轮重构将在交接文件更新后提交。
+46a0ee3 refactor: establish offline team-aware baseline（本文件的最终状态更新另行提交）。
 
 10. 工作区状态
-本轮代码、测试和文档已完成并通过上述验证；等待创建本轮 Git 提交。构建、Qt 依赖和测试运行产物均处于忽略目录。
+本轮代码、测试和文档已完成并通过上述验证；提交完成后工作区应为干净状态。构建、Qt 依赖和测试运行产物均处于忽略目录。
