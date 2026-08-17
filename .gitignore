@@ -4,6 +4,7 @@ build2/
 out/
 cmake-build-*/
 portable/
+artifacts/portable-current/
 Qt/
 reference/
 
