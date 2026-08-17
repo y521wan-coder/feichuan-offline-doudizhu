@@ -14,6 +14,7 @@
 6. 服务器发布状态：published，Release ID 49。
 7. 本轮没有修改冻结游戏规则、AI 暗牌隔离、快捷键或无障碍兼容路线。
 8. 功能提交：2032933 feat: publish signed installer update baseline。
+9. 发布记录文档提交：5da402f docs: record installer release and server publication。
 
 ======================================================================
 二、最终安装包
