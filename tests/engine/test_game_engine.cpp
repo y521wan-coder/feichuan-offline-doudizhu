@@ -169,7 +169,7 @@ private slots:
                  publicAfterPlay.actionHistory.back().cards.size());
     }
 
-    void testLegacyBiddingSaveMigratesCompleteBottomCardsToPublic() {
+    void testBiddingSaveKeepsCompleteBottomCardsHidden() {
         GameEngine engine;
         GameCommand start;
         start.type = GameCommandType::StartGame;
@@ -177,11 +177,53 @@ private slots:
         QVERIFY(engine.execute(start).success);
 
         QJsonObject saved = engine.state().toJson();
-        saved["bottomCardsRevealed"] = false;
+        saved["bottomCardsRevealed"] = true;
         const GameState restored = GameState::fromJson(saved);
         QCOMPARE(restored.phase(), GamePhase::Bidding);
-        QVERIFY(restored.fullState().bottomCardsRevealed);
+        QVERIFY(!restored.fullState().bottomCardsRevealed);
         QCOMPARE(static_cast<int>(restored.fullState().bottomCards.size()), BOTTOM_CARDS);
+        QVERIFY(!restored.publicSnapshot().bottomCardsRevealed);
+        QVERIFY(restored.publicSnapshot().bottomCards.empty());
+    }
+
+    void testPausedBiddingSaveKeepsCompleteBottomCardsHidden() {
+        GameEngine engine;
+        GameCommand start;
+        start.type = GameCommandType::StartGame;
+        start.randomSeed = 42;
+        QVERIFY(engine.execute(start).success);
+
+        GameCommand pause;
+        pause.type = GameCommandType::Pause;
+        QVERIFY(engine.execute(pause).success);
+        QCOMPARE(engine.state().previousPhase(), GamePhase::Bidding);
+
+        QJsonObject saved = engine.state().toJson();
+        saved["bottomCardsRevealed"] = true;
+        const GameState restored = GameState::fromJson(saved);
+        QCOMPARE(restored.phase(), GamePhase::Paused);
+        QCOMPARE(restored.previousPhase(), GamePhase::Bidding);
+        QVERIFY(!restored.fullState().bottomCardsRevealed);
+        QCOMPARE(static_cast<int>(restored.fullState().bottomCards.size()), BOTTOM_CARDS);
+        QVERIFY(restored.publicSnapshot().bottomCards.empty());
+
+        GameEngine resumedEngine;
+        resumedEngine.state() = restored;
+        GameCommand resume;
+        resume.type = GameCommandType::Resume;
+        QVERIFY(resumedEngine.execute(resume).success);
+        QCOMPARE(resumedEngine.state().phase(), GamePhase::Bidding);
+        QVERIFY(!resumedEngine.publicSnapshot().bottomCardsRevealed);
+        QVERIFY(resumedEngine.publicSnapshot().bottomCards.empty());
+
+        GameCommand bid;
+        bid.type = GameCommandType::Bid;
+        bid.playerId = resumedEngine.fullState().currentPlayer;
+        bid.bidValue = 3;
+        QVERIFY(resumedEngine.execute(bid).success);
+        QVERIFY(resumedEngine.publicSnapshot().bottomCardsRevealed);
+        QCOMPARE(static_cast<int>(resumedEngine.publicSnapshot().bottomCards.size()),
+                 BOTTOM_CARDS);
     }
 
     void testDamagedBiddingSaveDoesNotRevealIncompleteBottomCards() {
@@ -199,6 +241,8 @@ private slots:
         const GameState restored = GameState::fromJson(saved);
         QVERIFY(!restored.fullState().bottomCardsRevealed);
         QCOMPARE(static_cast<int>(restored.fullState().bottomCards.size()), BOTTOM_CARDS - 1);
+        QVERIFY(!restored.publicSnapshot().bottomCardsRevealed);
+        QVERIFY(restored.publicSnapshot().bottomCards.empty());
     }
 
     void testLandlordDeterminationRevealsBottomCardsExactlyOnce() {

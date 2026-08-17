@@ -1,4 +1,5 @@
 #include <QtTest>
+#include <QJsonArray>
 
 #include "ai/ai_level_profile.h"
 #include "ai/bidding_strategy.h"
@@ -29,6 +30,29 @@ bool containsResponse(const std::vector<LegalMove>& moves, CardPatternType type,
     return std::any_of(moves.begin(), moves.end(), [&](const LegalMove& move) {
         return move.pattern.type == type && move.pattern.mainRank == rank;
     });
+}
+
+QJsonObject swapBottomCardsWithNonBidderHand(QJsonObject saved, PlayerId bidder) {
+    QJsonArray players = saved["players"].toArray();
+    const int bidderIndex = static_cast<int>(bidder);
+    const int donorIndex = (bidderIndex + 1) % PLAYER_COUNT;
+    QJsonObject donor = players[donorIndex].toObject();
+    QJsonArray donorHand = donor["hand"].toArray();
+    QJsonArray bottomCards = saved["bottomCards"].toArray();
+
+    Q_ASSERT(bottomCards.size() == BOTTOM_CARDS);
+    Q_ASSERT(donorHand.size() >= BOTTOM_CARDS);
+    for (int index = 0; index < BOTTOM_CARDS; ++index) {
+        const QJsonValue originalBottomCard = bottomCards[index];
+        bottomCards[index] = donorHand[index];
+        donorHand[index] = originalBottomCard;
+    }
+
+    donor["hand"] = donorHand;
+    players[donorIndex] = donor;
+    saved["players"] = players;
+    saved["bottomCards"] = bottomCards;
+    return saved;
 }
 
 } // namespace
@@ -138,6 +162,54 @@ private slots:
         second.publicState.bottomCardsRevealed = true;
         StandardAiPlayer ai(AiDifficulty::Advanced);
         QCOMPARE(ai.decideBid(first).bidValue, ai.decideBid(second).bidValue);
+    }
+
+    void testRestoredBiddingAiIgnoresHiddenBottomCards() {
+        GameEngine engine;
+        GameCommand start;
+        start.type = GameCommandType::StartGame;
+        start.randomSeed = 42;
+        QVERIFY(engine.execute(start).success);
+
+        const PlayerId bidder = engine.fullState().currentPlayer;
+        QJsonObject firstSaved = engine.state().toJson();
+        firstSaved["bottomCardsRevealed"] = true;
+        QJsonObject secondSaved = swapBottomCardsWithNonBidderHand(firstSaved, bidder);
+
+        const GameState firstRestored = GameState::fromJson(firstSaved);
+        const GameState secondRestored = GameState::fromJson(secondSaved);
+        QVERIFY(firstRestored.fullState().bottomCards !=
+                secondRestored.fullState().bottomCards);
+        QCOMPARE(static_cast<int>(firstRestored.fullState().bottomCards.size()),
+                 BOTTOM_CARDS);
+        QCOMPARE(static_cast<int>(secondRestored.fullState().bottomCards.size()),
+                 BOTTOM_CARDS);
+
+        const AiObservation first = makeAiObservation(firstRestored, bidder);
+        const AiObservation second = makeAiObservation(secondRestored, bidder);
+        QCOMPARE(first.phase, GamePhase::Bidding);
+        QCOMPARE(second.phase, GamePhase::Bidding);
+        QVERIFY(first.ownHand.cards() == second.ownHand.cards());
+        QCOMPARE(first.decisionSeed, second.decisionSeed);
+        QCOMPARE(first.highestBid, second.highestBid);
+        QCOMPARE(first.publicState.gameId, second.publicState.gameId);
+        QCOMPARE(first.publicState.currentPlayer, second.publicState.currentPlayer);
+        QVERIFY(!first.publicState.bottomCardsRevealed);
+        QVERIFY(!second.publicState.bottomCardsRevealed);
+        QVERIFY(first.publicState.bottomCards.empty());
+        QVERIFY(second.publicState.bottomCards.empty());
+        for (int index = 0; index < PLAYER_COUNT; ++index) {
+            QCOMPARE(first.publicState.players[index].remainingCards,
+                     second.publicState.players[index].remainingCards);
+        }
+
+        StandardAiPlayer ai(AiDifficulty::Advanced);
+        const GameCommand firstBid = ai.decideBid(first);
+        const GameCommand secondBid = ai.decideBid(second);
+        QCOMPARE(firstBid.type, secondBid.type);
+        QCOMPARE(firstBid.playerId, secondBid.playerId);
+        QCOMPARE(firstBid.bidValue, secondBid.bidValue);
+        QCOMPARE(firstBid.aiDecisionReason, secondBid.aiDecisionReason);
     }
 };
 

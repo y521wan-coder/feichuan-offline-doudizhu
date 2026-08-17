@@ -242,9 +242,14 @@ GameState GameState::fromJson(const QJsonObject& json) {
             state.m_fullState.bottomCards.push_back(card);
         }
     }
-    if (state.m_phase == GamePhase::Bidding &&
-        state.m_fullState.bottomCards.size() == BOTTOM_CARDS) {
-        state.m_fullState.bottomCardsRevealed = true;
+    const bool biddingContext = state.m_phase == GamePhase::Bidding ||
+        (state.m_phase == GamePhase::Paused &&
+         state.m_previousPhase == GamePhase::Bidding);
+    if (biddingContext) {
+        // Bidding bottom cards remain private even when a legacy or damaged save
+        // claims they were revealed. Keep the cards in full engine state so the
+        // bidding round can resume and reveal them only after landlord selection.
+        state.m_fullState.bottomCardsRevealed = false;
     }
 
     // 上一手牌
