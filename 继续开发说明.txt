@@ -1,63 +1,599 @@
-飞船单机斗地主继续开发说明
+飞船单机斗地主——新会话完整开发交接说明
 更新时间：2026-08-17
+项目根目录：D:\飞船单机斗地主
 
-1. 当前阶段
-第一至第三阶段的可编译重构基线已经完成；第四阶段“重写农民 AI”已完成强制协作层和首批确定性场景，正在继续补高级搜索、公共信息推断与大规模模拟。独立更新器已形成可编译骨架，但发布签名、替换回滚和发布验收尚未完成。
+======================================================================
+一、这份文件怎么使用
+======================================================================
 
-2. 本轮完成内容
-- 在 D:\飞船单机斗地主 建立独立项目和全新 Git 历史，只迁入用户自有源码、测试、文档与素材。
-- 统一产品名和产品标识；AI 仅保留 Beginner、Intermediate、Advanced（初级、中级、高级）。
-- 删除 HeuristicModelPackage、模型文件路径、模型加载/校验、晋级和训练中心通信；新增内置 AiLevelProfile。
-- 通过 AiObservation 隔离 AI：策略只接收本家手牌、公共快照、公开叫分状态和独立决策种子。
-- 新增 FarmerTeamStrategy、LandlordStrategy 和公共原因码；落实让队友、禁止非例外炸弹/高牌压队友、地主一张守门、立即出完例外、最低代价压地主等规则。
-- 叫分阶段隐藏八张底牌；地主确定时公开一次并加入地主手牌；F2 在叫分阶段朗读“底牌尚未公开”，之后可重复查询。
-- 将联网更新拆成独立“飞船单机斗地主更新器.exe”；游戏主程序只负责启动更新器，不链接 Qt Network。
-- 新增 SHA-256 与 Windows Authenticode 验证入口，更新产品标识为 feichuan_offline_doudizhu。
-- 修复地主确定后底牌标签不显示的 UI 回归。
-- 将长时引擎模拟拆为两个独立 CTest 进程，保持 500 个种子覆盖并消除五分钟看门狗假失败。
-- 本地安装 Qt 6.8.3 开发依赖到忽略目录 Qt，并为中文项目路径增加自动 subst 构建支持。
+本文件用于把项目完整交给新的 Codex 会话或新的开发者。新会话不要仅凭聊天摘要继续工作，应先阅读本文件和 AGENTS.md，再根据任务读取对应规格。
 
-3. 修改文件
-- 构建/发布：CMakeLists.txt、CMakePresets.json、cmake/InstallRules.cmake、tools/build.ps1、tools/build_release.ps1、installer/飞船单机斗地主.iss。
-- AI：src/ai/ai_difficulty.h、ai_level_profile.*、ai_player.h、bidding_strategy.*、standard_ai.*、simple_ai.cpp、farmer_team_strategy.*、landlord_strategy.*；删除 heuristic_model.*。
-- 规则/UI：src/core/engine/game_engine.cpp、game_command.h、src/core/model/game_snapshot.h、src/ui/main_window.*、settings_dialog.cpp。
-- 更新器/持久化：apps/updater/*、src/app/application.cpp、src/persistence/data_paths.*；删除主程序内 update_service.*。
-- 测试：tests/CMakeLists.txt、tests/ai/*、tests/ai_scenarios/*、tests/engine/*、tests/simulation/*、tests/ui/*、tests/updater/*。
-- 文档：AGENTS.md、README.md、docs 下的新规格/日志/许可文件、assets/docs 下的产品内文档。
+新会话开始后先执行：
 
-4. 测试命令和结果
-- tools\build.ps1 -Preset debug-x64 -Configure -Build：通过，生成游戏和独立更新器。
-- ctest --preset debug-x64 -E "test_engine_simulation|test_ai" --output-on-failure：14/14 通过。
-- ctest --preset debug-x64 -R "^test_engine_simulation_" --output-on-failure：2/2 通过，共 500 局中级 AI，500 局正常结束，零非法命令，计分总和均为零；153.35 秒 + 149.99 秒。
-- test_ai：通过，其中高级 AI 自动牌局 500/500 正常结束，耗时约 388 秒。
-- test_farmer_cooperation：8 个确定性协作/不可见信息场景通过。
-- test_main_window_shortcuts：39/39 通过，包括叫分隐藏底牌、地主确定后显示与 F2 查询。
-- 静态边界扫描：活动代码无 Master/大师、旧产品标识、模型包和被排除二进制；Qt Network 只由独立更新器及其测试链接。
+  Set-Location 'D:\飞船单机斗地主'
+  Get-Content -Raw -Encoding UTF8 AGENTS.md
+  Get-Content -Raw -Encoding UTF8 '继续开发说明.txt'
+  git status --short
+  git log -5 --oneline
 
-5. 当前可运行状态
-- Debug 构建可运行：build\debug-x64\飞船单机斗地主.exe。
-- 独立更新器可运行：build\debug-x64\飞船单机斗地主更新器.exe。
-- tools\build.ps1 可从中文根目录直接调用，会在需要时使用临时 ASCII 盘符，构建文件仍物理保存在本项目 build 目录。
+如果本文件与代码不一致，以冻结规则、自动测试和代码实际行为为依据，并立即更新本文件。Windows PowerShell 5 读取无 BOM 的 UTF-8 中文文件时必须显式使用 `-Encoding UTF8`，否则终端可能显示乱码，但文件内容本身未损坏。
 
-6. 已知问题
-- 尚未完成每个等级至少 10000 局的正式模拟和统计报告；当前只完成中级 500 局与高级 500 局开发期稳定性覆盖。
-- 高级出牌 AI 的未知牌概率推断、迭代搜索和有限模拟仍需继续实现；当前高级概率采样主要用于叫分。
-- 尚未以 NVDA、Windows 讲述人、争渡和保益进行人工无障碍回归。
-- 更新器尚未完成真实签名发布、下载中断、替换失败回滚和断网人工验收。
-- 尚未执行 Release 构建、便携版、安装版及最终 SHA-256 发布流程。
+每轮开发结束前必须更新本文件和 docs\开发日志.md。AGENTS.md 已规定：没有更新交接文件，本轮不算完成。
 
-7. 下一轮准确步骤
-- 扩充 FarmerTeamStrategy 场景：队友剩两张历史推断、后位农民保留控制牌、唯一防败方案及例外诊断字段。
-- 在仅使用公共观察的前提下实现 Advanced 出牌未知牌采样、候选裁剪、迭代加深和有限模拟，并验证隐藏暗牌不变性。
-- 建立三档各 10000 局模拟程序与 CSV/JSON 汇总，输出地主/农民/座位胜率、让牌率、守门成功率和异常压队友记录。
-- 完成四种读屏软件的人工回归记录。
-- 补齐更新器签名、回滚、断网/取消测试后执行 Release 打包。
+======================================================================
+二、项目身份、版权和范围
+======================================================================
 
-8. 规则和 AI 不可变约束
-以 AGENTS.md、docs/规则规格.md 和 docs/AI协作规则.md 为准。不得读取其他玩家暗牌、真实底牌或洗牌未来信息；三个等级必须共享相同团队强制规则；叫分期间底牌必须隐藏；游戏主程序不得链接 Qt Network。
+1. 产品正式名称：飞船单机斗地主。
+2. 产品标识：feichuan_offline_doudizhu。
+3. 项目是 Windows 四人双副牌单机斗地主，不包含账号、匹配、真人联机或云牌局。
+4. 新项目 Git 历史独立，根提交为：
+   ee322a6 chore: migrate owned offline game baseline
+5. 基础源码、测试、界面、声音、图片和文档来自用户拥有完整版权的旧项目：
+   C:\Users\apple007\Downloads\飞船四人斗地主和AI训练系统完整开源包，\飞船AI斗地主单机版-开源版
+6. 外部 GitHub 项目只允许作为行为参考。不得复制其 Java、C#、APK、资源或读取四家完整手牌的实现。
+7. 旧训练中心、检查点、候选模型、训练日志、训练数据、`.fpdzmodel`、旧构建目录和安装包没有迁入。
+8. 来源和许可记录见 docs\参考资料与许可登记.md。
 
-9. 最近 Git 提交
-46a0ee3 refactor: establish offline team-aware baseline（本文件的最终状态更新另行提交）。
+======================================================================
+三、当前总体阶段和真实完成度
+======================================================================
 
-10. 工作区状态
-本轮代码、测试和文档已完成并通过上述验证；提交完成后工作区应为干净状态。构建、Qt 依赖和测试运行产物均处于忽略目录。
+第一阶段“建立独立项目”：已完成。
+- 已建立规定目录、迁移自有源码素材、初始化 Git、编译 Debug 基线。
+
+第二阶段“清理训练依赖”：已完成开发期清理。
+- 已删除模型包、模型加载、模型校验、模型路径、模型晋级和训练中心通信。
+- AI 等级只剩 Beginner、Intermediate、Advanced，界面只显示初级、中级、高级。
+- 尚需在每次发布前继续做静态扫描，防止旧术语或模型依赖回流。
+
+第三阶段“修正规则差异”：大部分完成，但存在一个必须优先修复的存档恢复缺陷。
+- 正常开局时叫分阶段底牌隐藏。
+- 地主确定后底牌公开一次、加入地主手牌，地主先出牌。
+- 叫分 AI 不读取实际底牌。
+- F2 在叫分阶段播报“底牌尚未公开”，地主确定后可重复查询。
+- 缺陷见第十一节 P0：加载叫分阶段存档时可能错误公开底牌。
+
+第四阶段“重写农民 AI”：已完成第一版强制协作层，完整高级搜索尚未完成。
+- 已有 FarmerTeamStrategy、LandlordStrategy、AiObservation 隔离和 8 个确定性场景。
+- 当前实现是可运行、可审查的启发式基线，不应宣称已经完成计划中的全部迭代搜索、未知牌推断和有限模拟。
+
+第五阶段“无障碍回归”：自动回归已通过，人工回归未执行。
+- 保留旧版 Qt Widgets、传统 UIA 焦点事件、键盘钩子、拿牌/放牌和朗读路径。
+- 尚未实际使用 NVDA、Windows 讲述人、争渡和保益逐项验收。
+
+第六阶段“独立更新器和发布”：只完成可编译骨架和基础校验。
+- 游戏主程序不链接 Qt Network，只启动独立更新器。
+- 更新器可检查、下载、校验 SHA-256 和调用 Windows Authenticode 验证。
+- 尚未完成真实签名发布、替换失败回滚、下载中断、断网、取消和安装包验收。
+- 尚未生成正式 Release 便携版和安装版。
+
+======================================================================
+四、不可修改的冻结规则
+======================================================================
+
+开发前必须阅读 docs\规则规格.md、docs\AI协作规则.md、docs\快捷键规格.md 和 docs\无障碍规格.md。下面是不能靠“兼容旧行为”推翻的核心约束。
+
+1. 两副牌共 108 张；四家各 25 张；8 张底牌。
+2. 随机叫分起始玩家；可不叫或叫 1/2/3 分；非零叫分必须高于当前最高分。
+3. 叫 3 分立即成为地主；否则一轮后最高叫分者成为地主；全部不叫立即重新洗牌发牌。
+4. 叫分期间 8 张底牌对真人和全部机器人隐藏。
+5. 地主确定后取得 8 张底牌，共 33 张；底牌向四家公开；地主首先出牌。
+6. 任意一个农民出完，三个农民共同获胜；地主出完则地主获胜。
+7. 牌型只允许：单、对、三张、三带一对、顺子、双顺、三顺、飞机带等量不同对子，以及冻结的炸弹体系。
+8. 不允许三带一、四带二、飞机带单牌。
+9. 飞机对子翅膀必须互不相同，且不能使用三顺主体点数。
+10. 顺子、双顺、三顺最大到 A，不能包含 2 和王。
+11. 炸弹等级固定为：枪 < 王炸 < 炮 < 火箭 < 导弹 < 天炸 < 天尊。
+12. 默认倍数：枪×2、王炸×4、炮×4、火箭×8、导弹×16、天炸×32、天尊×64、春天/反春×2，总倍数上限 4096。
+13. 地主得失分是农民单家得失分的三倍，四家分数总和必须为零。
+14. AI 只有初级、中级、高级。禁止恢复“大师级”或 Master。
+15. 禁止恢复模型文件、训练权重、训练接口或训练中心通信。
+16. 游戏本体、core、ai 和 UI 不得链接 Qt Network。
+17. Windows 无障碍界面在四种读屏软件人工验收通过前不得重做。
+
+======================================================================
+五、目录和模块职责
+======================================================================
+
+AGENTS.md                         全仓库强制开发约束。
+继续开发说明.txt                  本交接文件，每轮必须更新。
+CMakeLists.txt                    主目标、库边界、安装规则入口。
+CMakePresets.json                 Debug/Release/RelWithDebInfo 预设。
+
+src\core                         牌、手牌、108 张牌堆、牌型、比较、计分、状态机、公共快照。
+src\ai                           AI 接口、合法动作、叫分、地主策略、农民团队策略、三级档案。
+src\accessibility                公告调度、读屏文本和 Windows 兼容路径。
+src\ui                           Qt Widgets 界面、键盘钩子、快捷键、选择状态和音效调用。
+src\persistence                  设置、统计、存档、回放、诊断目录。
+src\audio                        预留的独立音频边界，目前主要音频逻辑仍在 UI 层。
+src\app                          游戏应用组合根，不允许出现网络客户端。
+apps\updater                     独立 Windows 更新器，唯一允许链接 Qt Network 的产品目标。
+
+assets                           用户自有声音、图片和产品内说明。
+tests\core                       基础模型测试。
+tests\rules                      牌型、比较和计分测试。
+tests\engine                     状态机快速测试。
+tests\ai                         通用 AI 合法性、档案和叫分隐私测试。
+tests\ai_scenarios               农民协作确定性场景。
+tests\simulation                 长时自动牌局模拟。
+tests\ui                         快捷键、选择、焦点、声音和 UI 无障碍回归。
+tests\updater                    更新协议解析和更新服务测试。
+
+data、logs                       本地开发数据和日志位置，不提交运行内容。
+build                            构建和测试输出，Git 忽略。
+artifacts                        便携版等中间发布产物。
+releases                         最终安装包、校验值和发布物。
+tools                            构建与发布脚本。
+
+======================================================================
+六、AI 架构和暗牌隔离边界
+======================================================================
+
+最重要接口位于 src\ai\ai_player.h：
+
+  struct AiObservation {
+      PlayerId playerId;
+      GamePhase phase;
+      Hand ownHand;
+      PublicGameSnapshot publicState;
+      int highestBid;
+      uint64_t decisionSeed;
+  };
+
+1. 策略类的虚函数只接受 AiObservation：
+   - decideBid(const AiObservation&)
+   - decidePlay(const AiObservation&)
+2. AiPlayer 中接受 GameState 的便利重载只能调用 makeAiObservation，然后立即进入观察接口。
+3. FarmerTeamStrategy、LandlordStrategy、BiddingStrategy 和未来搜索器不得保存或接收 GameState/FullGameState。
+4. FullGameState 只供引擎裁决、存档和测试夹具使用。
+5. PublicGameSnapshot 可以包含：身份、剩余张数、公开底牌、公开叫分/出牌/过牌历史、当前玩家、上一手牌和牌权。
+6. 不得把其他玩家 Hand、randomSeed、牌堆剩余顺序或未来事件加入 AiObservation。
+7. decisionSeed 当前只由 gameId、玩家座位和 eventSequence 构造，不直接使用洗牌 randomSeed。
+8. 修改任何 AI 输入后必须维护“改变不可见暗牌但公共观察和种子不变时，决策不变”的测试。
+
+关键文件：
+- src\ai\ai_player.h：观察对象和隔离入口。
+- src\core\model\game_snapshot.h：PublicGameSnapshot 与 FullGameState 的边界。
+- tests\ai_scenarios\test_farmer_cooperation.cpp：隐藏暗牌不变性测试。
+
+======================================================================
+七、当前 AI 实现到底做了什么
+======================================================================
+
+1. 难度档案，位于 src\ai\ai_level_profile.cpp：
+
+   Beginner     150ms，depth=1，candidateLimit=8，samples=0，randomness=0.35
+   Intermediate 450ms，depth=2，candidateLimit=24，samples=0，randomness=0.10
+   Advanced    1000ms，depth=4，candidateLimit=64，samples=96，randomness=0.00
+
+2. AiLevelProfile 是固定、可审查配置，不是训练权重。
+3. StandardAiPlayer 是当前统一决策入口；SimpleAiPlayer 只委托给 StandardAiPlayer。
+4. FarmerTeamStrategy 在难度搜索之前过滤不安全动作，保证三个难度共享团队底线。
+5. 当前已经覆盖的主要行为：
+   - 无危险时让队友单牌。
+   - 队友出对子时，即使只能用高对子压住也让牌。
+   - 非例外情况下不使用炸弹压队友。
+   - 自己压队友后可以立即出完时允许出牌，并标记团队例外。
+   - 地主只剩一张且存在公开威胁时允许接管牌权。
+   - 压地主时倾向使用足够大的最低代价动作。
+   - 队友剩一张时领出低单牌。
+6. GameCommand 中已有：
+   - aiDecisionReason：公开决策原因码。
+   - aiTeamRuleException：是否触发压队友例外。
+7. AI 诊断由 UI 写入时只允许包含公共信息、动作和原因码，不得记录他家手牌。
+8. BiddingStrategy 只接收本家 Hand、当前最高叫分、等级和 decisionSeed。
+9. Advanced 叫分会从本家未知牌集合中随机采样假设底牌；不会读取实际底牌。
+10. StandardAiPlayer 当前的“搜索”主要是：合法候选生成、剩余手牌形状评分、有限后续动作统计、候选限制和截止时间检查。
+11. 当前尚未实现完整的 Advanced 出牌未知牌分布模拟、真正的迭代加深或多方回合树搜索。
+12. publicInferenceSamples 目前主要用于 Advanced 叫分采样，不代表高级出牌推断已经完成。
+13. LandlordStrategy 当前是轻量评分器，不是完整深度搜索器。
+
+不要通过让初级农民攻击队友来降低难度。三个等级的强制协作过滤必须完全一致，差异只能来自预算、搜索深度、候选数量、公共信息推断和安全候选间随机程度。
+
+======================================================================
+八、当前农民协作测试覆盖
+======================================================================
+
+tests\ai_scenarios\test_farmer_cooperation.cpp 当前有 8 个确定性用例：
+
+1. yieldsToTeammateSingleWithoutThreat
+2. yieldsToTeammatePairEvenWhenOnlyHighPairCanBeat
+3. neverBombsTeammateWithoutException
+4. immediateFinishMayOvertakeTeammate
+5. blocksVisibleOneCardLandlordThreat
+6. usesMinimumCostResponseAgainstLandlord
+7. leadsLowSingleForOneCardTeammate
+8. invisibleHandsCannotChangeDecision
+
+尚应补充：
+
+1. 队友剩两张时，根据公开历史区分提供单牌或对子机会。
+2. 当前农民无法经济拦截时，为后位农民保留 2、王和炸弹。
+3. 地主立即获胜威胁下，搜索确认“唯一防败动作”的例外。
+4. 三种允许压队友的例外分别校验 aiDecisionReason 和 aiTeamRuleException。
+5. 非紧急情况下使用 2、小王或大王压队友的发生次数必须为零或接近零。
+6. 多种地主响应牌型下始终选择“足够大的最低代价组合”。
+
+======================================================================
+九、底牌时机、F2 和已知存档缺陷
+======================================================================
+
+正常新牌局路径：
+
+1. GameEngine::handleStartGame 把 bottomCardsRevealed 设为 false。
+2. StartGame 结果不发送 BottomCardsRevealed 事件。
+3. PublicGameSnapshot 在未公开时返回空 bottomCards。
+4. 叫 3 分或叫分一轮结束确定地主后，引擎先确定地主并加入底牌，再发送一次 BottomCardsRevealed。
+5. UI 只有在 bottomCardsRevealed 且正好有 8 张时显示“公开底牌”。
+6. F2 的入口集中到 MainWindow::triggerBottomCardsShortcut；叫分阶段说“底牌尚未公开”。
+
+P0 已知缺陷，下一会话应首先修复：
+
+文件：src\core\engine\game_state.cpp
+位置：GameState::fromJson 的“底牌”恢复逻辑。
+当前错误代码会在 `phase == Bidding` 且 JSON 中存在完整 8 张底牌时，强制把 `bottomCardsRevealed` 改为 true。这违反“叫分阶段对所有人和机器人隐藏底牌”的冻结规则。
+
+同时存在一个错误测试：
+tests\engine\test_game_engine.cpp
+testLegacyBiddingSaveMigratesCompleteBottomCardsToPublic
+
+该测试当前期待恢复后公开底牌，必须改成期待不公开。新项目不需要为了旧存档兼容而违反冻结规则。建议修改为：
+
+- fromJson 在 Bidding 阶段无条件保持 bottomCardsRevealed=false。
+- PublicGameSnapshot.bottomCards 必须为空。
+- 保留引擎内部完整 8 张底牌，以便叫分继续进行。
+- 重命名测试为 testBiddingSaveKeepsCompleteBottomCardsHidden。
+- 增加序列化/恢复后 AI 叫分不受底牌实际内容影响的测试。
+
+修复后至少运行 test_game_engine、test_ai 和 test_main_window_shortcuts。
+
+======================================================================
+十、无障碍与键盘路径
+======================================================================
+
+这部分来自旧版长期验证行为，修改风险高。不要为了“简化代码”把多条 Windows 键盘路径合并或删除，除非四种读屏软件均已人工验证。
+
+必须保持：
+
+1. 左右光标按点数组浏览未拿起实体牌。
+2. Shift+左右逐张浏览。
+3. Home/End 跳到第一组/最后一组。
+4. 上光标拿起一张；Ctrl+上拿起当前完整点数组。
+5. 下光标按拿起顺序放下一张；Ctrl+下全部放下。
+6. 已拿起牌退出浏览序列，放下后恢复正确位置。
+7. 拿放牌时读屏静默，只保留操作音效。
+8. 忽略选牌按键自动重复。
+9. 手牌只读“张数+点数”，不读花色、位置、总张数和选择状态。
+10. 出牌播报必须包含完整主体和附带牌，下一家 AI 等必要播报完成。
+11. 过牌只播放对应声线，不增加重复公告。
+12. 保留 Qt/UIA 传统焦点事件播报，不改变真实键盘焦点。
+13. 不并行发送多套公告。
+
+MainWindow 中同一快捷键可能有 Qt Shortcut、Qt keyEvent、nativeEvent 和低级键盘钩子路径，这是为读屏兼容保留的。修改 F1/F2/F5/F11/F12、方向键、Ctrl、Shift、Space 或 Alt 菜单行为时，必须运行 tests\ui\test_main_window_shortcuts.cpp 的完整套件。
+
+当前自动 UI 测试共 39 个函数并已通过。人工待测读屏：NVDA、Windows 讲述人、争渡、保益。人工结果应写入 docs\测试与验收.md。
+
+Android 只保留 docs\安卓无障碍预留说明.md；Windows 工程不得加入 AndroidX/TalkBack 代码。
+
+======================================================================
+十一、独立更新器现状和安全边界
+======================================================================
+
+产品目标：
+
+- 飞船单机斗地主.exe
+- 飞船单机斗地主更新器.exe
+
+当前边界：
+
+1. 主程序 MainWindow::checkForUpdates 只使用 QProcess::startDetached 启动更新器。
+2. 主程序、fpdz_core、fpdz_ai、fpdz_ui 不链接 Qt Network。
+3. apps\updater 是唯一允许使用 QNetworkAccessManager 的产品目录。
+4. 更新地址保持 https://update.327802521.xyz。
+5. 请求产品标识为 feichuan_offline_doudizhu。
+6. UpdateService 解析版本响应、下载临时安装包并计算 SHA-256。
+7. signature_verifier.cpp 使用 WinVerifyTrust 验证 Authenticode。
+8. 下载验证通过后，更新器启动安装包；游戏失败时仍可继续离线运行。
+9. 更新器不得读取或上传存档、手牌、统计、回放、设置或日志。
+
+仍未完成或未验收：
+
+1. 使用真实开发者证书的签名链和发布环境验证。
+2. 签名发布者身份固定/白名单策略；当前 WinVerifyTrust 只验证签名可信，不核对特定发布者。
+3. 下载中断、磁盘写入失败、取消、断网和超时的完整自动测试。
+4. 安装替换失败的回滚方案。
+5. 游戏运行中替换、重启和安装器参数的端到端测试。
+6. 每天最多检查一次和关闭自动检查的完整行为验收。
+7. 更新服务端真实 JSON、版本比较、哈希和大小字段契约的联调。
+
+发布前必须重新执行：
+
+  rg.exe -n "Qt6::Network|QNetwork" CMakeLists.txt tests\CMakeLists.txt src apps
+
+预期：Qt Network 只出现在 apps\updater、独立更新器目标和更新器测试。
+
+======================================================================
+十二、构建环境和中文路径问题
+======================================================================
+
+当前机器：
+
+- Windows x64。
+- Visual Studio Build Tools 2026，MSVC 19.50/工具目录 14.50.35717。
+- CMake/Ninja 随 VS Build Tools 安装。
+- Qt 6.8.3 MSVC 2022 x64 位于项目内：Qt\6.8.3\msvc2022_64。
+- 用于安装 Qt/CMake 的 Python 环境位于 build\aqt-venv。
+- Qt、build 和安装工具日志均被 Git 忽略，不在仓库历史中。
+
+重要问题：这台机器上的 CMake 3.31 在直接使用中文源码绝对路径时曾以 -1073740791 崩溃。tools\build.ps1 已处理：如果根路径含非 ASCII 字符，会寻找 R/Q/P/O/N 盘符并使用 subst 映射；构建文件仍物理写入 D:\飞船单机斗地主\build。脚本只删除自己创建的映射。
+
+不要绕过脚本直接在中文根路径执行首次 CMake 配置。推荐命令：
+
+  Set-Location 'D:\飞船单机斗地主'
+  .\tools\build.ps1 -Preset debug-x64 -Configure -Build
+
+只增量编译：
+
+  .\tools\build.ps1 -Preset debug-x64 -Build
+
+执行完整测试（耗时较长）：
+
+  .\tools\build.ps1 -Preset debug-x64 -Test
+
+清理并重新配置：
+
+  .\tools\build.ps1 -Preset debug-x64 -Clean -Configure -Build
+
+不要对项目根目录或未校验路径做递归删除。build.ps1 的 Clean 已检查目标必须位于 build\<preset> 下。
+
+Debug 可执行文件：
+
+  build\debug-x64\飞船单机斗地主.exe
+  build\debug-x64\飞船单机斗地主更新器.exe
+
+Release 脚本：
+
+  .\tools\build_release.ps1
+  .\tools\build_release.ps1 -Deploy
+  .\tools\build_release.ps1 -Package
+
+Release 脚本已经通过 PowerShell 语法检查，但尚未完成真实 Release 构建和打包验证。`-Deploy` 会重建 artifacts\portable-current；`-Package` 会重建 build\installer-stage。两处删除前都有父目录安全检查。
+
+======================================================================
+十三、测试命令、耗时和最近结果
+======================================================================
+
+快速测试命令（排除两个长测试组）：
+
+  & '.\build\aqt-venv\Scripts\ctest.exe' --preset debug-x64 `
+      -E 'test_engine_simulation|test_ai' --output-on-failure
+
+最近结果：14/14 通过，总计约 6.53 秒。其中包括 core、rules、settings、updater、game_engine、farmer_cooperation、UI 和声音测试。
+
+中级 AI 500 局模拟：
+
+  & '.\build\aqt-venv\Scripts\ctest.exe' --preset debug-x64 `
+      -R '^test_engine_simulation_' --output-on-failure
+
+最近结果：
+- seeds 1–250：250/250 通过，153.35 秒。
+- seeds 251–500：250/250 通过，149.99 秒。
+- 合计 500/500 正常结束，零非法命令，结算分数总和均为零。
+
+高级 AI 开发期合法性和稳定性：
+
+  & '.\build\debug-x64\test_ai.exe' -o -,txt
+
+最近结果：通过，其中 Advanced 自动牌局 500/500 正常结束；Debug 耗时约 388 秒。
+
+单独运行农民协作测试：
+
+  & '.\build\debug-x64\test_farmer_cooperation.exe' -o -,txt
+
+单独运行 UI 快捷键测试：
+
+  & '.\build\debug-x64\test_main_window_shortcuts.exe' -o -,txt
+
+QtTest 在 CTest 下有时失败输出为空。遇到时直接运行对应 exe 并写文本日志：
+
+  & '.\build\debug-x64\test_game_engine.exe' `
+      -o '.\build\debug-x64\game-engine-result.txt',txt
+  Get-Content -Raw -Encoding UTF8 '.\build\debug-x64\game-engine-result.txt'
+
+测试框架曾在单个 Qt 进程累计约五分钟时触发看门狗。因此 500 局中级模拟被拆成两个 CTest 进程，各跑 250 局。不要重新合并为一个测试进程。
+
+正式版尚需：Beginner、Intermediate、Advanced 每档至少 10000 局，并输出地主胜率、农民胜率、各座位胜率、让牌率、守门成功率、非法动作、无法结束、炸弹压队友、高牌压队友和全部例外原因记录。开发期的 500 局不能替代正式验收。
+
+======================================================================
+十四、下一阶段任务优先级
+======================================================================
+
+P0：先修冻结规则冲突
+
+1. 修复 GameState::fromJson 在叫分阶段错误公开完整底牌的问题。
+2. 改正 testLegacyBiddingSaveMigratesCompleteBottomCardsToPublic 的错误期待。
+3. 增加存档恢复后的公共快照与 AI 叫分隐私测试。
+4. 运行 game_engine、ai、UI 快捷键测试。
+
+P1：补齐农民强制协作层
+
+1. 队友剩两张的单牌/对子机会推断。
+2. 无力经济拦截时给后位农民保留控制牌和炸弹。
+3. 唯一防止地主立即获胜动作的搜索证明和原因码。
+4. 三种压队友例外的独立测试与诊断字段。
+5. 确认所有难度先经过同一 FarmerTeamStrategy 过滤，再做等级差异搜索。
+
+P2：实现真正的 Advanced 公共信息搜索
+
+1. 从两副牌全集减去本家牌、公开底牌和公开出牌，得到未知牌池。
+2. 只按公开剩余张数对未知牌做概率分配，不读取引擎其他 Hand。
+3. 实现候选动作裁剪、迭代加深和 1000ms 截止。
+4. 有限模拟只使用采样的可能局面，不能使用真实暗牌。
+5. 每一步保持隐藏暗牌变化不影响相同观察和种子下的决策。
+6. 搜索层不得绕过 FarmerTeamStrategy 的强制协作结果。
+
+P3：建立三级各 10000 局模拟与指标报告
+
+1. 模拟程序放 tests\simulation 或 tools，输出写入 artifacts 或 logs。
+2. 固定随机种子范围，支持分片和断点续跑。
+3. 输出 CSV/JSON 和人类可读摘要。
+4. 零非法出牌、零无法结束、零越权读取暗牌。
+5. 非例外炸弹压队友必须为零；非紧急高牌压队友率必须接近零。
+
+P4：无障碍人工回归
+
+1. 按 docs\快捷键规格.md 逐项测试。
+2. 分别记录 NVDA、讲述人、争渡和保益版本与结果。
+3. 检查焦点不移动、公告不重复、拿放牌静默、下一 AI 等待播报完成。
+4. 未通过前不重做 Windows UI。
+
+P5：更新器和正式发布
+
+1. 固定开发者签名发布者身份。
+2. 完成断网、取消、下载损坏、签名不符、替换失败和回滚测试。
+3. 验证更新器不访问用户存档/统计/日志。
+4. 执行 Release 构建、windeployqt、便携版和 Inno Setup 安装版。
+5. 保存安装包 SHA-256、签名检查结果、测试报告和版本交接。
+
+======================================================================
+十五、修改不同模块时的安全流程
+======================================================================
+
+修改规则/状态机：
+
+1. 先读 docs\规则规格.md。
+2. 修改 src\core，不在 UI 或 AI 中复制规则判断。
+3. 在 tests\rules 或 tests\engine 增加确定性测试。
+4. 运行快速测试和至少一组自动牌局。
+5. 检查序列化/恢复、公共快照和回放是否同步。
+
+修改 AI：
+
+1. 只从 AiObservation 开始设计。
+2. 先补失败场景，再修改 FarmerTeamStrategy/LandlordStrategy/StandardAiPlayer。
+3. 强制团队层优先于等级评分和随机选择。
+4. 诊断只记录公共事实和 reasonCode。
+5. 运行隐藏暗牌不变性测试、协作场景、合法动作测试和模拟。
+
+修改 UI/快捷键/朗读：
+
+1. 先读 docs\快捷键规格.md 和 docs\无障碍规格.md。
+2. 不删除看似重复的 nativeEvent、Qt event、shortcut 或 Windows hook 路径。
+3. 保持真实键盘焦点不被公告改变。
+4. 运行全部 test_main_window_shortcuts 和 test_sound_management。
+5. 重大修改必须人工使用四种读屏软件验证。
+
+修改更新器：
+
+1. 网络代码只能位于 apps\updater。
+2. 主程序只能启动更新器，不接收网络响应或安装包内容。
+3. 下载必须同时通过 HTTPS、SHA-256 和开发者签名验证。
+4. 失败、取消或断网不能影响游戏数据和离线启动。
+5. 补 tests\updater，并做 Qt Network 链接边界扫描。
+
+修改构建/发布：
+
+1. 所有输出只能进入 build、artifacts、releases、logs 或 data。
+2. 不提交 Qt、本地虚拟环境、二进制、安装包或日志。
+3. 保持两个可执行文件的中文输出名。
+4. PowerShell 脚本尽量保持 ASCII 源码；Windows PowerShell 5 对无 BOM UTF-8 中文脚本可能误解码。tools\build_release.ps1 使用字符码构造中文进程/文件名，避免此问题。
+
+======================================================================
+十六、提交前静态审计
+======================================================================
+
+在项目根目录执行：
+
+  rg.exe -uuu -n -i "Master|大师" `
+      src apps tests CMakeLists.txt cmake tools installer assets
+
+预期无结果。
+
+  rg.exe -uuu -n -i `
+      "HeuristicModelPackage|fpdzmodel|active_tiers|candidate model|checkpoint" `
+      src apps tests CMakeLists.txt cmake tools installer assets
+
+预期活动代码无结果。说明“已删除模型”的文档文本可以存在，但不得存在可执行依赖。
+
+  rg.exe -uuu -n `
+      "飞船AI斗地主单机版|FourPlayerDoudizhu|feichuan_ai_doudizhu" `
+      src apps tests CMakeLists.txt cmake tools installer assets
+
+预期活动产品文件无结果。许可登记中可以保留旧项目来源名称。
+
+  rg.exe -n "Qt6::Network|QtNetwork|QNetwork" `
+      CMakeLists.txt tests\CMakeLists.txt src apps
+
+预期只命中独立更新器、apps\updater 和更新器测试。
+
+  Get-ChildItem -Recurse -File | Where-Object {
+      $_.FullName -notmatch '\\.git\\|\\build\\|\\Qt\\' -and
+      ($_.Extension -in '.fpdzmodel','.apk','.aab','.msi' -or
+       $_.Name -match 'active_tiers|checkpoint')
+  }
+
+预期无结果。
+
+最后执行：
+
+  git diff --check
+  git status --short
+
+提交前处理所有非预期文件。不要删除或覆盖不属于当前任务的用户修改。
+
+======================================================================
+十七、Git 状态和关键提交
+======================================================================
+
+关键历史：
+
+  ee322a6 chore: migrate owned offline game baseline
+  46a0ee3 refactor: establish offline team-aware baseline
+  2c5933b docs: finalize development handoff
+
+本文件更新完成后会产生新的文档交接提交，因此新会话应以 `git log -5 --oneline` 的第一行为最新提交，以 46a0ee3 作为最近功能基线提交。
+
+开始修改前工作区应为空：`git status --short` 不输出内容。若存在修改，先判断是否为用户或其他会话的工作，禁止使用 `git reset --hard` 或 `git checkout --` 擅自丢弃。
+
+每轮提交建议分为：
+
+1. 功能/测试提交。
+2. 最终交接文档提交。
+
+交接文件不能可靠写入它自己的最终提交哈希，因此应记录最近功能提交，并让下一会话用 git log 获取最新文档提交。
+
+======================================================================
+十八、每轮交接必须写清楚的内容
+======================================================================
+
+每轮结束时在本文件顶部或对应章节更新：
+
+1. 当前阶段。
+2. 本轮实际完成内容，不把骨架写成正式完成。
+3. 修改文件和核心接口。
+4. 测试命令、通过数、失败数、耗时和未运行项。
+5. 两个程序是否可编译、可启动。
+6. 已知缺陷和风险。
+7. 下一轮准确步骤，按 P0/P1/P2 排序。
+8. 不可变规则和 AI 信息边界是否保持。
+9. 最近功能提交和最近文档提交。
+10. 工作区是否干净，忽略目录中有哪些本地产物。
+
+如果测试失败，不要只写“失败”；要记录失败测试名、断言、复现命令和最后成功的提交。
+
+======================================================================
+十九、推荐给新会话的首条消息
+======================================================================
+
+可以把下面内容原样发给新的开发会话：
+
+“请接手 D:\飞船单机斗地主。先完整读取根目录 AGENTS.md 和 继续开发说明.txt，再执行 git status --short 和 git log -5 --oneline。严格遵守 AI 暗牌隔离、农民团队规则、叫分底牌隐藏、Windows 无障碍保留和主程序禁用 Qt Network 的约束。先处理交接文件第九节的 P0 存档恢复底牌泄露问题，补测试并运行相关回归；不要恢复训练/模型系统，不要复制外部参考项目源码。每轮结束更新 docs\开发日志.md 和 继续开发说明.txt，并提交 Git。”
+
+======================================================================
+二十、当前交接结论
+======================================================================
+
+项目当前是“可编译、可运行、基础测试通过的定向重构开发基线”，不是首个正式版。
+
+已经可以继续进行规则修复、AI 场景开发、搜索实现和更新器测试。下一会话最先修复 GameState::fromJson 的叫分存档底牌泄露，然后继续 FarmerTeamStrategy 和 Advanced 公共信息搜索。三级各 10000 局、四种读屏人工验收、真实签名更新和 Release 发布未完成，不能在版本说明中宣称已经验收。
