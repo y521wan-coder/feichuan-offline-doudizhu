@@ -10,20 +10,17 @@
 #include <QMenu>
 #include <QStatusBar>
 #include <QTimer>
-#include <QProgressDialog>
 #include <QElapsedTimer>
 #include <QAction>
 #include <QString>
 #include <QVector>
 #include <memory>
-#include <array>
 #include "sound_service.h"
 #include "../app/app_settings.h"
 #include "../core/engine/game_command.h"
 #include "../core/engine/game_event.h"
 #include "../core/engine/game_state.h"
 #include "../accessibility/announcement.h"
-#include "../ai/heuristic_model.h"
 namespace fpdz {
 class GameEngine;
 class HandListModel;
@@ -34,8 +31,6 @@ class StatisticsRepository;
 class SoundService;
 class DiagnosticTraceService;
 class ResultDialog;
-class UpdateService;
-struct UpdateCheckResult;
 class MainWindow : public QMainWindow, public QAbstractNativeEventFilter {
     Q_OBJECT
 public:
@@ -85,10 +80,6 @@ private:
     bool openHelpTextFile(const QString& fileName);
     void showDonateDialog();
     void checkForUpdates(bool manual);
-    void handleUpdateCheckFinished(const UpdateCheckResult& result);
-    void startUpdateDownload(const UpdateCheckResult& update);
-    void handleUpdateDownloadFinished(const QString& installerPath,
-                                      const QString& errorMessage);
     void openPlayerNameDialog(PlayerId playerId);
     void resetPlayerDisplayNames();
     void scheduleAiTurn(int minimumDelayMilliseconds = 0);
@@ -106,7 +97,6 @@ private:
     void traceHandAction(const QString& action, const QJsonObject& before,
                          const QJsonObject& details = {});
     void requestApplicationExit();
-    void checkTrainingInstallExitRequest();
     void installKeyboardHook();
     void uninstallKeyboardHook();
     void registerSystemHotkeys();
@@ -159,7 +149,6 @@ private:
     std::unique_ptr<SettingsRepository> m_settingsRepo;
     std::unique_ptr<StatisticsRepository> m_statisticsRepo;
     std::unique_ptr<SoundService> m_sound;
-    std::unique_ptr<UpdateService> m_updateService;
     AppSettings m_settings;
     QListView* m_handView = nullptr;
     QLabel* m_statusLabel = nullptr;
@@ -173,16 +162,10 @@ private:
     QVector<QPushButton*> m_bidButtons;
     QTimer* m_aiTimer = nullptr;
     QTimer* m_turnCountdownTimer = nullptr;
-    QTimer* m_trainingInstallExitTimer = nullptr;
     int m_turnSecondsRemaining = 0;
     bool m_wasHumanTurn = false;
     bool m_biddingControlsVisible = false;
     bool m_forceExitRequested = false;
-    std::array<HeuristicWeights, 3> m_tierWeights{};
-    QString m_modelLoadWarning;
-    bool m_manualUpdateCheck = false;
-    bool m_updateCheckInProgress = false;
-    QProgressDialog* m_updateProgressDialog = nullptr;
     QElapsedTimer m_battleShortcutTimer;
     QVector<int> m_registeredHotkeys;
     QMenu* m_gameMenu = nullptr;

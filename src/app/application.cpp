@@ -3,10 +3,10 @@
 #include "../persistence/data_paths.h"
 namespace fpdz {
 Application::Application(int& argc, char** argv) : QApplication(argc, argv) {
-    setApplicationName("FourPlayerDoudizhu");
-    setApplicationDisplayName(QString::fromUtf8(u8"飞船AI斗地主单机版"));
+    setApplicationName("feichuan_offline_doudizhu");
+    setApplicationDisplayName(QString::fromUtf8(u8"飞船单机斗地主"));
     setApplicationVersion(FPDZ_APP_VERSION);
-    setOrganizationName("FourPlayerDoudizhu");
+    setOrganizationName("Feichuan");
 }
 Application::~Application() = default;
 ServiceRegistry& Application::services() { return *m_services; }

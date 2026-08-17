@@ -8,7 +8,7 @@ set(_qt6_bin "${_qt6_root}/bin")
 
 # Helper function for creating test targets
 function(fpdz_add_test TEST_NAME)
-    set(options "")
+    set(options NO_DEFAULT_TEST)
     set(oneValueArgs "")
     set(multiValueArgs SOURCES LIBS)
     cmake_parse_arguments(TEST "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
@@ -20,7 +20,9 @@ function(fpdz_add_test TEST_NAME)
         Qt6::Test
     )
     target_include_directories(${TEST_NAME} PRIVATE "${CMAKE_SOURCE_DIR}/src")
-    add_test(NAME ${TEST_NAME} COMMAND ${TEST_NAME})
+    if(NOT TEST_NO_DEFAULT_TEST)
+        add_test(NAME ${TEST_NAME} COMMAND ${TEST_NAME})
+    endif()
 
     # Copy Qt DLLs next to test executable so it can run without PATH changes
     add_custom_command(TARGET ${TEST_NAME} POST_BUILD
@@ -29,9 +31,6 @@ function(fpdz_add_test TEST_NAME)
             "$<TARGET_FILE_DIR:${TEST_NAME}>"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${_qt6_bin}/Qt6Test$<$<CONFIG:Debug>:d>.dll"
-            "$<TARGET_FILE_DIR:${TEST_NAME}>"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${_qt6_bin}/Qt6Network$<$<CONFIG:Debug>:d>.dll"
             "$<TARGET_FILE_DIR:${TEST_NAME}>"
         COMMENT "Deploying Qt DLLs for ${TEST_NAME}"
     )
@@ -44,8 +43,13 @@ fpdz_add_test(test_app_settings
 )
 
 fpdz_add_test(test_update_service
-    SOURCES app/test_update_service.cpp
-    LIBS fpdz_app Qt6::Network
+    SOURCES updater/test_update_service.cpp
+            ${CMAKE_SOURCE_DIR}/apps/updater/update_service.cpp
+            ${CMAKE_SOURCE_DIR}/apps/updater/signature_verifier.cpp
+    LIBS Qt6::Widgets Qt6::Network wintrust crypt32
+)
+target_include_directories(test_update_service PRIVATE
+    "${CMAKE_SOURCE_DIR}/apps/updater"
 )
 
 fpdz_add_test(test_card
@@ -98,9 +102,28 @@ fpdz_add_test(test_game_engine
     LIBS fpdz_core fpdz_ai
 )
 
+fpdz_add_test(test_engine_simulation
+    NO_DEFAULT_TEST
+    SOURCES simulation/test_engine_simulation.cpp
+    LIBS fpdz_core fpdz_ai
+)
+add_test(NAME test_engine_simulation_seeds_1_250
+    COMMAND test_engine_simulation testSeeds1To250)
+add_test(NAME test_engine_simulation_seeds_251_500
+    COMMAND test_engine_simulation testSeeds251To500)
+set_tests_properties(
+    test_engine_simulation_seeds_1_250
+    test_engine_simulation_seeds_251_500
+    PROPERTIES TIMEOUT 300
+)
+
 # AI tests
 fpdz_add_test(test_ai
     SOURCES ai/test_ai.cpp
+    LIBS fpdz_core fpdz_ai
+)
+fpdz_add_test(test_farmer_cooperation
+    SOURCES ai_scenarios/test_farmer_cooperation.cpp
     LIBS fpdz_core fpdz_ai
 )
 set_tests_properties(test_ai PROPERTIES
@@ -119,7 +142,6 @@ target_link_libraries(test_main_window_shortcuts PRIVATE
     Qt6::Core
     Qt6::Gui
     Qt6::Widgets
-    Qt6::Network
     Qt6::Test
     winmm.lib
 )
@@ -160,9 +182,6 @@ add_custom_command(TARGET test_main_window_shortcuts POST_BUILD
         "${_qt6_bin}/Qt6Widgets$<$<CONFIG:Debug>:d>.dll"
         "$<TARGET_FILE_DIR:test_main_window_shortcuts>"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "${_qt6_bin}/Qt6Network$<$<CONFIG:Debug>:d>.dll"
-        "$<TARGET_FILE_DIR:test_main_window_shortcuts>"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
         "${_qt6_bin}/Qt6Test$<$<CONFIG:Debug>:d>.dll"
         "$<TARGET_FILE_DIR:test_main_window_shortcuts>"
     COMMAND ${CMAKE_COMMAND} -E make_directory
@@ -171,10 +190,10 @@ add_custom_command(TARGET test_main_window_shortcuts POST_BUILD
         "${_qt6_root}/plugins/platforms/qwindows$<$<CONFIG:Debug>:d>.dll"
         "$<TARGET_FILE_DIR:test_main_window_shortcuts>/platforms"
     COMMAND ${CMAKE_COMMAND} -E copy_directory
-        "${CMAKE_SOURCE_DIR}/resources/sounds"
+        "${CMAKE_SOURCE_DIR}/assets/sounds"
         "$<TARGET_FILE_DIR:test_main_window_shortcuts>/resources/sounds"
     COMMAND ${CMAKE_COMMAND} -E copy_directory
-        "${CMAKE_SOURCE_DIR}/resources/docs"
+        "${CMAKE_SOURCE_DIR}/assets/docs"
         "$<TARGET_FILE_DIR:test_main_window_shortcuts>/resources/docs"
     COMMENT "Deploying Qt Widgets DLLs for test_main_window_shortcuts"
 )

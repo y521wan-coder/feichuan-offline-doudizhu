@@ -166,7 +166,7 @@ bool SoundOverrideManager::exportTemplate(const QString& parentFolder,
     }
 
     QStringList lines;
-    lines << QString::fromUtf8(u8"飞船AI斗地主单机版音效包模板")
+    lines << QString::fromUtf8(u8"飞船单机斗地主音效包模板")
           << QStringLiteral("================================")
           << QString()
           << QString::fromUtf8(u8"请把未压缩 PCM WAV 文件放入下列相对路径。可以只提供想替换的部分文件。")
@@ -214,7 +214,7 @@ bool SoundOverrideManager::exportCurrentPack(const QString& parentFolder,
     }
 
     QStringList lines;
-    lines << QString::fromUtf8(u8"飞船AI斗地主单机版当前完整音效包")
+    lines << QString::fromUtf8(u8"飞船单机斗地主当前完整音效包")
           << QStringLiteral("====================================")
           << QString()
           << QString::fromUtf8(u8"本音效包包含导出时实际生效的全部 WAV，可通过“导入音效包”重新使用。")

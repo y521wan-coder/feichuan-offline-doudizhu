@@ -46,7 +46,7 @@ struct PublicGameSnapshot {
     // Player public states (no hidden cards)
     std::array<PlayerPublicState, PLAYER_COUNT> players;
 
-    // Bottom cards (public during bidding and later phases)
+    // Bottom cards (hidden during bidding; public after landlord selection)
     std::vector<Card> bottomCards;
     bool bottomCardsRevealed = false;
 
@@ -68,7 +68,8 @@ struct PublicGameSnapshot {
     std::vector<PublicActionRecord> actionHistory;
 };
 
-// Full game state - only accessible to engine and authorized AI
+// Full game state - accessible to the engine and adjudication code only.
+// AI strategies receive AiObservation and must never receive this structure.
 struct FullGameState {
     uint64_t gameId = 0;
     uint64_t randomSeed = 0;

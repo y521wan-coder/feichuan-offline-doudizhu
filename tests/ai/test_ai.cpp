@@ -1,0 +1,145 @@
+#include <QtTest>
+
+#include "ai/ai_level_profile.h"
+#include "ai/bidding_strategy.h"
+#include "ai/legal_move_generator.h"
+#include "ai/simple_ai.h"
+#include "ai/standard_ai.h"
+#include "core/engine/game_engine.h"
+#include "core/rules/pattern_analyzer.h"
+#include "core/rules/pattern_comparator.h"
+
+using namespace fpdz;
+
+namespace {
+
+std::vector<Card> sameRankCards(Rank rank, int count) {
+    std::vector<Card> cards;
+    const Suit suits[] = {Suit::Spades, Suit::Hearts, Suit::Clubs, Suit::Diamonds};
+    for (int deck = 0; deck < 2 && static_cast<int>(cards.size()) < count; ++deck) {
+        for (const Suit suit : suits) {
+            if (static_cast<int>(cards.size()) >= count) break;
+            cards.push_back(Card::create(rank, suit, static_cast<DeckIndex>(deck)));
+        }
+    }
+    return cards;
+}
+
+bool containsResponse(const std::vector<LegalMove>& moves, CardPatternType type, Rank rank) {
+    return std::any_of(moves.begin(), moves.end(), [&](const LegalMove& move) {
+        return move.pattern.type == type && move.pattern.mainRank == rank;
+    });
+}
+
+} // namespace
+
+class TestAi : public QObject {
+    Q_OBJECT
+private slots:
+    void testAiBidReturnsValidCommand() {
+        GameEngine engine;
+        GameCommand start;
+        start.type = GameCommandType::StartGame;
+        start.randomSeed = 42;
+        QVERIFY(engine.execute(start).success);
+        SimpleAiPlayer ai;
+        const auto command = ai.decideBid(engine.state(), engine.fullState().currentPlayer);
+        QCOMPARE(command.type, GameCommandType::Bid);
+        QVERIFY(command.bidValue >= 0 && command.bidValue <= 3);
+    }
+
+    void testAdvancedAiNeverPlaysIllegal() {
+        StandardAiPlayer ai(AiDifficulty::Advanced);
+        constexpr int kAdvancedStabilityGames = 500;
+        int completedGames = 0;
+        for (int seed = 1; seed <= kAdvancedStabilityGames; ++seed) {
+            GameEngine engine;
+            GameCommand start;
+            start.type = GameCommandType::StartGame;
+            start.randomSeed = seed;
+            QVERIFY(engine.execute(start).success);
+            for (int actions = 0; actions < 1000; ++actions) {
+                const auto phase = engine.state().phase();
+                if (phase == GamePhase::Finished) break;
+                const auto player = engine.fullState().currentPlayer;
+                const auto command = phase == GamePhase::Bidding
+                    ? ai.decideBid(engine.state(), player)
+                    : ai.decidePlay(engine.state(), player);
+                QVERIFY2(engine.execute(command).success, "AI produced an illegal command");
+            }
+            QCOMPARE(engine.state().phase(), GamePhase::Finished);
+            QVERIFY(engine.fullState().roundResult.valid);
+            ++completedGames;
+        }
+        QCOMPARE(completedGames, kAdvancedStabilityGames);
+    }
+
+    void testGeneratedMovesAreAlwaysLegal() {
+        for (int seed = 1; seed <= 50; ++seed) {
+            GameEngine engine;
+            GameCommand start;
+            start.type = GameCommandType::StartGame;
+            start.randomSeed = seed;
+            QVERIFY(engine.execute(start).success);
+            const auto moves = LegalMoveGenerator::generateLegalMoves(
+                engine.fullState().players[0].hand);
+            QVERIFY(!moves.empty());
+            for (const auto& move : moves) {
+                const auto analyzed = PatternAnalyzer::analyze(move.cards);
+                QVERIFY(analyzed.isValid());
+                QCOMPARE(analyzed.type, move.pattern.type);
+            }
+        }
+    }
+
+    void testGeneratedResponsesIncludeWinningMoves() {
+        Hand hand;
+        hand.addCards(sameRankCards(Rank::Four, 3));
+        hand.addCards(sameRankCards(Rank::Two, 2));
+        const auto tripleThree = PatternAnalyzer::analyze(sameRankCards(Rank::Three, 3));
+        const auto pairAce = PatternAnalyzer::analyze(sameRankCards(Rank::Ace, 2));
+        const auto tripleResponses = LegalMoveGenerator::generateLegalMoves(hand, tripleThree);
+        const auto pairResponses = LegalMoveGenerator::generateLegalMoves(hand, pairAce);
+        QVERIFY(containsResponse(tripleResponses, CardPatternType::Triple, Rank::Four));
+        QVERIFY(containsResponse(pairResponses, CardPatternType::Pair, Rank::Two));
+    }
+
+    void testGeneratedMovesIncludeKingBomb() {
+        Hand hand;
+        hand.addCard(Card::create(Rank::SmallJoker, Suit::None, 0));
+        hand.addCard(Card::create(Rank::BigJoker, Suit::None, 0));
+        hand.addCards(sameRankCards(Rank::Three, 5));
+        const auto freeMoves = LegalMoveGenerator::generateLegalMoves(hand);
+        QVERIFY(containsResponse(freeMoves, CardPatternType::KingBomb, Rank::BigJoker));
+    }
+
+    void testThreeDifficultyProfiles() {
+        const auto& beginner = aiLevelProfile(AiDifficulty::Beginner);
+        const auto& intermediate = aiLevelProfile(AiDifficulty::Intermediate);
+        const auto& advanced = aiLevelProfile(AiDifficulty::Advanced);
+        QCOMPARE(beginner.decisionBudgetMs, 150);
+        QCOMPARE(intermediate.decisionBudgetMs, 450);
+        QCOMPARE(advanced.decisionBudgetMs, 1000);
+        QVERIFY(beginner.searchDepth < intermediate.searchDepth);
+        QVERIFY(intermediate.searchDepth < advanced.searchDepth);
+        QVERIFY(beginner.candidateLimit < advanced.candidateLimit);
+    }
+
+    void testBiddingIgnoresInjectedHiddenBottomCards() {
+        Hand hand;
+        hand.addCards(sameRankCards(Rank::Two, 4));
+        AiObservation first;
+        first.playerId = PlayerId::Player2;
+        first.ownHand = hand;
+        first.phase = GamePhase::Bidding;
+        first.decisionSeed = 77;
+        AiObservation second = first;
+        second.publicState.bottomCards = sameRankCards(Rank::Ace, 8);
+        second.publicState.bottomCardsRevealed = true;
+        StandardAiPlayer ai(AiDifficulty::Advanced);
+        QCOMPARE(ai.decideBid(first).bidValue, ai.decideBid(second).bidValue);
+    }
+};
+
+QTEST_MAIN(TestAi)
+#include "test_ai.moc"

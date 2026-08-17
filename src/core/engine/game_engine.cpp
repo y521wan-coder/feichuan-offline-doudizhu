@@ -59,11 +59,8 @@ CommandResult GameEngine::handleStartGame(const GameCommand& cmd) {
     dealEvt.message = L"发牌完成，每人25张";
     result.events.push_back(dealEvt);
 
-    m_state.fullState().bottomCardsRevealed = true;
-    auto revealEvt = createEvent(GameEventType::BottomCardsRevealed);
-    revealEvt.cards = m_state.fullState().bottomCards;
-    revealEvt.message = L"叫分底牌已公开";
-    result.events.push_back(revealEvt);
+    // The eight bottom cards remain private engine state throughout bidding.
+    m_state.fullState().bottomCardsRevealed = false;
 
     // Start bidding
     m_state.setPhase(GamePhase::Bidding);
@@ -157,6 +154,11 @@ CommandResult GameEngine::handleBid(const GameCommand& cmd) {
         llEvt.message = playerIdDisplayName(cmd.playerId) + L"成为地主！";
         result.events.push_back(llEvt);
 
+        auto revealEvt = createEvent(GameEventType::BottomCardsRevealed);
+        revealEvt.cards = fs.bottomCards;
+        revealEvt.message = L"地主确定，底牌已公开";
+        result.events.push_back(revealEvt);
+
         return result;
     }
 
@@ -219,6 +221,11 @@ CommandResult GameEngine::handleBid(const GameCommand& cmd) {
         llEvt.playerId = fs.highestBidder;
         llEvt.message = playerIdDisplayName(fs.highestBidder) + L"成为地主！";
         result.events.push_back(llEvt);
+
+        auto revealEvt = createEvent(GameEventType::BottomCardsRevealed);
+        revealEvt.cards = fs.bottomCards;
+        revealEvt.message = L"地主确定，底牌已公开";
+        result.events.push_back(revealEvt);
 
         return result;
     }

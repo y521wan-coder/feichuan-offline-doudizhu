@@ -1,0 +1,63 @@
+飞船单机斗地主继续开发说明
+更新时间：2026-08-17
+
+1. 当前阶段
+第一至第三阶段的可编译重构基线已经完成；第四阶段“重写农民 AI”已完成强制协作层和首批确定性场景，正在继续补高级搜索、公共信息推断与大规模模拟。独立更新器已形成可编译骨架，但发布签名、替换回滚和发布验收尚未完成。
+
+2. 本轮完成内容
+- 在 D:\飞船单机斗地主 建立独立项目和全新 Git 历史，只迁入用户自有源码、测试、文档与素材。
+- 统一产品名和产品标识；AI 仅保留 Beginner、Intermediate、Advanced（初级、中级、高级）。
+- 删除 HeuristicModelPackage、模型文件路径、模型加载/校验、晋级和训练中心通信；新增内置 AiLevelProfile。
+- 通过 AiObservation 隔离 AI：策略只接收本家手牌、公共快照、公开叫分状态和独立决策种子。
+- 新增 FarmerTeamStrategy、LandlordStrategy 和公共原因码；落实让队友、禁止非例外炸弹/高牌压队友、地主一张守门、立即出完例外、最低代价压地主等规则。
+- 叫分阶段隐藏八张底牌；地主确定时公开一次并加入地主手牌；F2 在叫分阶段朗读“底牌尚未公开”，之后可重复查询。
+- 将联网更新拆成独立“飞船单机斗地主更新器.exe”；游戏主程序只负责启动更新器，不链接 Qt Network。
+- 新增 SHA-256 与 Windows Authenticode 验证入口，更新产品标识为 feichuan_offline_doudizhu。
+- 修复地主确定后底牌标签不显示的 UI 回归。
+- 将长时引擎模拟拆为两个独立 CTest 进程，保持 500 个种子覆盖并消除五分钟看门狗假失败。
+- 本地安装 Qt 6.8.3 开发依赖到忽略目录 Qt，并为中文项目路径增加自动 subst 构建支持。
+
+3. 修改文件
+- 构建/发布：CMakeLists.txt、CMakePresets.json、cmake/InstallRules.cmake、tools/build.ps1、tools/build_release.ps1、installer/飞船单机斗地主.iss。
+- AI：src/ai/ai_difficulty.h、ai_level_profile.*、ai_player.h、bidding_strategy.*、standard_ai.*、simple_ai.cpp、farmer_team_strategy.*、landlord_strategy.*；删除 heuristic_model.*。
+- 规则/UI：src/core/engine/game_engine.cpp、game_command.h、src/core/model/game_snapshot.h、src/ui/main_window.*、settings_dialog.cpp。
+- 更新器/持久化：apps/updater/*、src/app/application.cpp、src/persistence/data_paths.*；删除主程序内 update_service.*。
+- 测试：tests/CMakeLists.txt、tests/ai/*、tests/ai_scenarios/*、tests/engine/*、tests/simulation/*、tests/ui/*、tests/updater/*。
+- 文档：AGENTS.md、README.md、docs 下的新规格/日志/许可文件、assets/docs 下的产品内文档。
+
+4. 测试命令和结果
+- tools\build.ps1 -Preset debug-x64 -Configure -Build：通过，生成游戏和独立更新器。
+- ctest --preset debug-x64 -E "test_engine_simulation|test_ai" --output-on-failure：14/14 通过。
+- ctest --preset debug-x64 -R "^test_engine_simulation_" --output-on-failure：2/2 通过，共 500 局中级 AI，500 局正常结束，零非法命令，计分总和均为零；153.35 秒 + 149.99 秒。
+- test_ai：通过，其中高级 AI 自动牌局 500/500 正常结束，耗时约 388 秒。
+- test_farmer_cooperation：8 个确定性协作/不可见信息场景通过。
+- test_main_window_shortcuts：39/39 通过，包括叫分隐藏底牌、地主确定后显示与 F2 查询。
+- 静态边界扫描：活动代码无 Master/大师、旧产品标识、模型包和被排除二进制；Qt Network 只由独立更新器及其测试链接。
+
+5. 当前可运行状态
+- Debug 构建可运行：build\debug-x64\飞船单机斗地主.exe。
+- 独立更新器可运行：build\debug-x64\飞船单机斗地主更新器.exe。
+- tools\build.ps1 可从中文根目录直接调用，会在需要时使用临时 ASCII 盘符，构建文件仍物理保存在本项目 build 目录。
+
+6. 已知问题
+- 尚未完成每个等级至少 10000 局的正式模拟和统计报告；当前只完成中级 500 局与高级 500 局开发期稳定性覆盖。
+- 高级出牌 AI 的未知牌概率推断、迭代搜索和有限模拟仍需继续实现；当前高级概率采样主要用于叫分。
+- 尚未以 NVDA、Windows 讲述人、争渡和保益进行人工无障碍回归。
+- 更新器尚未完成真实签名发布、下载中断、替换失败回滚和断网人工验收。
+- 尚未执行 Release 构建、便携版、安装版及最终 SHA-256 发布流程。
+
+7. 下一轮准确步骤
+- 扩充 FarmerTeamStrategy 场景：队友剩两张历史推断、后位农民保留控制牌、唯一防败方案及例外诊断字段。
+- 在仅使用公共观察的前提下实现 Advanced 出牌未知牌采样、候选裁剪、迭代加深和有限模拟，并验证隐藏暗牌不变性。
+- 建立三档各 10000 局模拟程序与 CSV/JSON 汇总，输出地主/农民/座位胜率、让牌率、守门成功率和异常压队友记录。
+- 完成四种读屏软件的人工回归记录。
+- 补齐更新器签名、回滚、断网/取消测试后执行 Release 打包。
+
+8. 规则和 AI 不可变约束
+以 AGENTS.md、docs/规则规格.md 和 docs/AI协作规则.md 为准。不得读取其他玩家暗牌、真实底牌或洗牌未来信息；三个等级必须共享相同团队强制规则；叫分期间底牌必须隐藏；游戏主程序不得链接 Qt Network。
+
+9. 最近 Git 提交
+ee322a6 chore: migrate owned offline game baseline。本轮重构将在交接文件更新后提交。
+
+10. 工作区状态
+本轮代码、测试和文档已完成并通过上述验证；等待创建本轮 Git 提交。构建、Qt 依赖和测试运行产物均处于忽略目录。

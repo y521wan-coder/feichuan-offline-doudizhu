@@ -18,7 +18,7 @@ public:
     // for real games and deliberately cannot be replayed from a public seed.
     static bool secureShuffle(std::vector<Card>& deck);
 
-    // Deterministic and unbiased bounded draw for tests/training.
+    // Deterministic and unbiased bounded draw for tests.
     static uint64_t deterministicBounded(uint64_t seed, uint64_t bound);
 
     // Unbiased bounded draw from the operating-system entropy source.

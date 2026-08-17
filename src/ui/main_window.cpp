@@ -11,13 +11,11 @@
 #include "../ai/ai_player.h"
 #include "../ai/simple_ai.h"
 #include "../ai/standard_ai.h"
-#include "../ai/heuristic_model.h"
 #include "../persistence/data_paths.h"
 #include "../ai/hint_service.h"
 #include "../persistence/settings_repository.h"
 #include "../persistence/statistics_repository.h"
 #include "../persistence/data_paths.h"
-#include "../app/update_service.h"
 #include "../core/text/card_text_formatter.h"
 #include "../core/text/game_text_formatter.h"
 #include "../core/audio/card_pattern_sound_plan.h"
@@ -41,7 +39,6 @@
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QMessageBox>
-#include <QProgressDialog>
 #include <QProcess>
 #include <QOperatingSystemVersion>
 #include <QSysInfo>
@@ -76,12 +73,12 @@ namespace fpdz {
 namespace {
 
 constexpr int kFirstRunGuideRevision = 2;
-const auto kStartupUpdateGuideFileName = u8"飞船AI斗地主单机版2.0更新说明.txt";
-const auto kDetailedGuideFileName = u8"飞船AI斗地主单机版详细使用说明.txt";
-const auto kRulesFileName = u8"飞船AI斗地主单机版玩法说明.txt";
-const auto kShortcutsFileName = u8"飞船AI斗地主单机版快捷键说明.txt";
-const auto kSoundGuideFileName = u8"飞船AI斗地主单机版音效分类与替换说明.txt";
-const auto kChangelogFileName = u8"飞船AI斗地主单机版更新日志.txt";
+const auto kStartupUpdateGuideFileName = u8"飞船单机斗地主更新说明.txt";
+const auto kDetailedGuideFileName = u8"飞船单机斗地主详细使用说明.txt";
+const auto kRulesFileName = u8"飞船单机斗地主玩法说明.txt";
+const auto kShortcutsFileName = u8"飞船单机斗地主快捷键说明.txt";
+const auto kSoundGuideFileName = u8"飞船单机斗地主音效分类与替换说明.txt";
+const auto kChangelogFileName = u8"飞船单机斗地主更新日志.txt";
 
 QString redactedPath(QString path) {
     const QString home = QDir::homePath();
@@ -122,7 +119,8 @@ QJsonObject sanitizeTraceEvent(const QJsonObject& source) {
         QStringLiteral("accessibility_mode_changed"),
         QStringLiteral("screen_reader_backend_initialized"),
         QStringLiteral("speech_delivery"), QStringLiteral("speech_suppressed"),
-        QStringLiteral("bottom_cards_revealed_for_bidding"),
+        QStringLiteral("ai_decision"),
+        QStringLiteral("bottom_cards_revealed"),
         QStringLiteral("bottom_cards_announced"),
         QStringLiteral("bottom_cards_queried"), QStringLiteral("trace_overflow")
     };
@@ -140,7 +138,9 @@ QJsonObject sanitizeTraceEvent(const QJsonObject& source) {
         QStringLiteral("detail"),
         QStringLiteral("dropped_count"),
         QStringLiteral("route"), QStringLiteral("backend"), QStringLiteral("channel"),
-        QStringLiteral("result"), QStringLiteral("bottom_count")
+        QStringLiteral("result"), QStringLiteral("bottom_count"),
+        QStringLiteral("team_rule_exception"), QStringLiteral("last_played_by"),
+        QStringLiteral("last_card_count"), QStringLiteral("landlord_remaining")
     };
     QJsonObject result;
     for (const QString& key : allowedKeys) {
@@ -160,79 +160,8 @@ QString cardFourVoiceFile(PlayerId playerId, const QString& fileName,
            "/" + fileName + ".wav";
 }
 
-struct TierWeightsLoadResult {
-    std::array<HeuristicWeights, 3> weights{
-        HeuristicWeights::defaults(), HeuristicWeights::defaults(), HeuristicWeights::defaults()};
-    QString warning;
-};
-
-TierWeightsLoadResult loadTierWeights() {
-    TierWeightsLoadResult result;
-    QFile manifestFile(DataPaths::activeTierManifestFile());
-    if (manifestFile.exists()) {
-        if (!manifestFile.open(QIODevice::ReadOnly)) {
-            result.warning = QStringLiteral("无法读取三级机器人模型清单，当前使用内置三级机器人。");
-            return result;
-        }
-        QJsonParseError parseError;
-        const auto document = QJsonDocument::fromJson(manifestFile.readAll(), &parseError);
-        const auto root = document.object();
-        if (parseError.error != QJsonParseError::NoError || !document.isObject() ||
-            root.value(QStringLiteral("schemaVersion")).toInt() != 1 ||
-            root.value(QStringLiteral("ruleFingerprint")).toString() !=
-                QLatin1String(FOUR_PLAYER_STANDARD_V1_FINGERPRINT)) {
-            result.warning = QStringLiteral("三级机器人模型清单格式或规则指纹无效，当前使用内置三级机器人。");
-            return result;
-        }
-        const auto models = root.value(QStringLiteral("models")).toObject();
-        const auto hashes = root.value(QStringLiteral("sha256")).toObject();
-        const std::array<QString, 3> names = {
-            QStringLiteral("beginner"), QStringLiteral("intermediate"), QStringLiteral("master")};
-        for (size_t index = 0; index < names.size(); ++index) {
-            const QString relative = models.value(names[index]).toString();
-            const QString expectedHash = hashes.value(names[index]).toString().toLower();
-            const QString modelsRoot = QDir::cleanPath(QDir(DataPaths::modelsDir()).absolutePath());
-            const QString path = QDir::cleanPath(QDir(modelsRoot).absoluteFilePath(relative));
-            QFile modelFile(path);
-            if (relative.isEmpty() || !path.startsWith(modelsRoot + QLatin1Char('/'),
-                                                       Qt::CaseInsensitive) ||
-                !modelFile.open(QIODevice::ReadOnly)) {
-                result.warning = QStringLiteral("三级机器人模型清单无效，当前使用内置三级机器人。");
-                return result;
-            }
-            const QByteArray bytes = modelFile.readAll();
-            const QString actualHash = QString::fromLatin1(
-                QCryptographicHash::hash(bytes, QCryptographicHash::Sha256).toHex());
-            QString error;
-            const auto package = HeuristicModelPackage::fromJson(
-                QJsonDocument::fromJson(bytes).object(), &error);
-            if (!package || !package->promotionEligible ||
-                package->tierLabel != names[index] || expectedHash != actualHash) {
-                result.warning = QStringLiteral("三级机器人模型校验失败，当前使用内置三级机器人。原因：%1")
-                                     .arg(error.isEmpty() ? QStringLiteral("文件哈希不符") : error);
-                return result;
-            }
-            result.weights[index] = package->weights;
-        }
-        return result;
-    }
-
-    const QString legacyPath = DataPaths::activeMasterModelFile();
-    if (QFileInfo::exists(legacyPath)) {
-        QString error;
-        const auto legacy = HeuristicModelPackage::loadFile(legacyPath, &error);
-        if (legacy && legacy->promotionEligible) {
-            result.weights[static_cast<size_t>(AiDifficulty::Master)] = legacy->weights;
-        } else {
-            result.warning = QStringLiteral("原大师模型校验失败，当前大师使用内置逻辑。原因：%1").arg(error);
-        }
-    }
-    return result;
-}
-
-std::unique_ptr<AiPlayer> createAiPlayer(AiDifficulty difficulty,
-                                         const HeuristicWeights& weights) {
-    return std::make_unique<StandardAiPlayer>(difficulty, weights);
+std::unique_ptr<AiPlayer> createAiPlayer(AiDifficulty difficulty) {
+    return std::make_unique<StandardAiPlayer>(difficulty);
 }
 
 int aiDelayMilliseconds(int setting) {
@@ -510,7 +439,7 @@ MainWindow::MainWindow(GameEngine& engine, AccessibilityService& accessibility,
 #ifdef Q_OS_WIN
     g_openMenuCount = 0;
 #endif
-    setWindowTitle(QString::fromUtf8(u8"飞船AI斗地主单机版"));
+    setWindowTitle(QString::fromUtf8(u8"飞船单机斗地主"));
     setMinimumSize(800, 600);
     m_handModel = std::make_unique<HandListModel>();
     m_playerModel = std::make_unique<PlayerStatusModel>();
@@ -518,27 +447,8 @@ MainWindow::MainWindow(GameEngine& engine, AccessibilityService& accessibility,
     // AI timer
     m_settingsRepo = std::make_unique<SettingsRepository>();
     m_statisticsRepo = std::make_unique<StatisticsRepository>();
-    m_updateService = std::make_unique<UpdateService>(this);
-    connect(m_updateService.get(), &UpdateService::checkFinished,
-            this, &MainWindow::handleUpdateCheckFinished);
-    connect(m_updateService.get(), &UpdateService::downloadProgress,
-            this, [this](qint64 received, qint64 total) {
-                if (!m_updateProgressDialog) return;
-                if (total > 0) {
-                    m_updateProgressDialog->setRange(0, 1000);
-                    m_updateProgressDialog->setValue(
-                        static_cast<int>((received * 1000) / total));
-                } else {
-                    m_updateProgressDialog->setRange(0, 0);
-                }
-            });
-    connect(m_updateService.get(), &UpdateService::downloadFinished,
-            this, &MainWindow::handleUpdateDownloadFinished);
     m_statisticsRepo->load(DataPaths::statisticsFile());
     loadSettings();
-    const auto tierLoad = loadTierWeights();
-    m_tierWeights = tierLoad.weights;
-    m_modelLoadWarning = tierLoad.warning;
     if (m_diagnosticTrace) {
         m_diagnosticTrace->record(QJsonObject{
             {QStringLiteral("type"), QStringLiteral("screen_reader_backend_initialized")},
@@ -571,12 +481,6 @@ MainWindow::MainWindow(GameEngine& engine, AccessibilityService& accessibility,
         }
     });
 
-    m_trainingInstallExitTimer = new QTimer(this);
-    m_trainingInstallExitTimer->setInterval(1000);
-    connect(m_trainingInstallExitTimer, &QTimer::timeout,
-            this, &MainWindow::checkTrainingInstallExitRequest);
-    m_trainingInstallExitTimer->start();
-    
     setupMenus();
     setupUi();
     setupShortcuts();
@@ -597,14 +501,6 @@ MainWindow::MainWindow(GameEngine& engine, AccessibilityService& accessibility,
     QTimer::singleShot(300, this, [this]() {
         playSound(SoundId::GameStart);
     });
-    if (!m_modelLoadWarning.isEmpty()) {
-        QTimer::singleShot(700, this, [this]() {
-            if (!qApp->property("fpdz.suppressStartupPrompts").toBool()) {
-                QMessageBox::warning(this, QStringLiteral("机器人模型已安全回退"),
-                                     m_modelLoadWarning);
-            }
-        });
-    }
     QTimer::singleShot(0, this, [this]() {
         if (qApp->property("fpdz.suppressStartupPrompts").toBool()) return;
         if (m_settings.firstRunGuideRevision < kFirstRunGuideRevision &&
@@ -622,7 +518,6 @@ MainWindow::MainWindow(GameEngine& engine, AccessibilityService& accessibility,
 }
 
 MainWindow::~MainWindow() {
-    if (m_updateService) m_updateService->cancel();
     unregisterSystemHotkeys();
     uninstallKeyboardHook();
 #ifdef Q_OS_WIN
@@ -787,7 +682,7 @@ void MainWindow::setupMenus() {
     connect(aboutAction, &QAction::triggered, this, [this]() {
         QMessageBox::about(this,
             QString::fromStdWString(L"关于"),
-            QString::fromUtf8(u8"飞船AI斗地主单机版 V") +
+            QString::fromUtf8(u8"飞船单机斗地主 V") +
                 QCoreApplication::applicationVersion() +
                 QString::fromUtf8(u8"\n无障碍 Windows 单机游戏"));
     });
@@ -1099,12 +994,12 @@ void MainWindow::refreshFromState(int preferredHandRow, bool restoreHandFocusSil
     m_gameInfoLabel->setText(QString::fromStdWString(info));
     m_gameInfoLabel->setAccessibleName(QString::fromStdWString(info));
 
-    const bool showBottomCards = snap.phase == GamePhase::Bidding &&
-        snap.bottomCardsRevealed && snap.bottomCards.size() == BOTTOM_CARDS;
+    const bool showBottomCards = snap.bottomCardsRevealed &&
+        snap.bottomCards.size() == BOTTOM_CARDS;
     if (m_bottomCardsLabel) {
         if (showBottomCards) {
             const QString bottomCardsText = QString::fromStdWString(
-                L"叫分底牌：" + CardTextFormatter::formatPublicCards(snap.bottomCards));
+                L"公开底牌：" + CardTextFormatter::formatPublicCards(snap.bottomCards));
             m_bottomCardsLabel->setText(bottomCardsText);
             m_bottomCardsLabel->setAccessibleName(bottomCardsText);
             m_bottomCardsLabel->setAccessibleDescription(bottomCardsText);
@@ -1233,7 +1128,7 @@ void MainWindow::processAiBid() {
         return;
     }
     const auto difficulty = static_cast<AiDifficulty>(m_settings.aiDifficulty);
-    auto ai = createAiPlayer(difficulty, m_tierWeights[static_cast<size_t>(difficulty)]);
+    auto ai = createAiPlayer(difficulty);
     executeAiBidCommand(ai->decideBid(m_engine.state(), currentPlayer));
 }
 
@@ -1287,11 +1182,32 @@ void MainWindow::processAiPlay() {
         return;
     }
     const auto difficulty = static_cast<AiDifficulty>(m_settings.aiDifficulty);
-    auto ai = createAiPlayer(difficulty, m_tierWeights[static_cast<size_t>(difficulty)]);
+    auto ai = createAiPlayer(difficulty);
     executeAiPlayCommand(ai->decidePlay(m_engine.state(), currentPlayer));
 }
 
 void MainWindow::executeAiPlayCommand(const GameCommand& command) {
+    if (m_diagnosticTrace && !command.aiDecisionReason.empty()) {
+        const auto snapshot = m_engine.publicSnapshot();
+        int landlordRemaining = -1;
+        for (const auto& player : snapshot.players) {
+            if (player.role == Role::Landlord) {
+                landlordRemaining = player.remainingCards;
+                break;
+            }
+        }
+        m_diagnosticTrace->record(QJsonObject{
+            {QStringLiteral("type"), QStringLiteral("ai_decision")},
+            {QStringLiteral("game_id"), static_cast<qint64>(snapshot.gameId)},
+            {QStringLiteral("phase"), gamePhaseText(snapshot.phase)},
+            {QStringLiteral("player_id"), static_cast<int>(command.playerId)},
+            {QStringLiteral("reason"), QString::fromStdString(command.aiDecisionReason)},
+            {QStringLiteral("team_rule_exception"), command.aiTeamRuleException},
+            {QStringLiteral("last_played_by"), static_cast<int>(snapshot.lastPlayedBy)},
+            {QStringLiteral("last_card_count"),
+             static_cast<int>(snapshot.lastPlayedCards.size())},
+            {QStringLiteral("landlord_remaining"), landlordRemaining}});
+    }
     auto result = m_engine.execute(command);
     if (result.success) {
         rememberLastAction(result);
@@ -1944,7 +1860,7 @@ void MainWindow::installKeyboardHook() {
                 0);
         }
         if (!g_keyboardHook) {
-            std::wstring message = L"FourPlayerDoudizhu keyboard hook install failed, error ";
+            std::wstring message = L"FeichuanOfflineDoudizhu keyboard hook install failed, error ";
             message += std::to_wstring(GetLastError());
             message += L"\n";
             OutputDebugStringW(message.c_str());
@@ -1984,7 +1900,7 @@ void MainWindow::registerSystemHotkeys() {
             return;
         }
 
-        std::wstring message = L"FourPlayerDoudizhu hotkey register failed: ";
+        std::wstring message = L"FeichuanOfflineDoudizhu hotkey register failed: ";
         message += name;
         message += L", error ";
         message += std::to_wstring(GetLastError());
@@ -2428,116 +2344,24 @@ void MainWindow::showDonateDialog() {
 }
 
 void MainWindow::checkForUpdates(bool manual) {
-    if (!m_updateService) return;
-    if (m_updateCheckInProgress) {
+    const QString updaterPath = QDir(QCoreApplication::applicationDirPath()).filePath(
+        QString::fromUtf8(u8"飞船单机斗地主更新器.exe"));
+    const QStringList arguments{
+        manual ? QStringLiteral("--manual") : QStringLiteral("--automatic"),
+        QStringLiteral("--current-version"), QCoreApplication::applicationVersion()};
+    if (!QFileInfo::exists(updaterPath) ||
+        !QProcess::startDetached(updaterPath, arguments)) {
         if (manual) {
-            QMessageBox::information(this, QString::fromUtf8(u8"检查更新"),
-                                     QString::fromUtf8(u8"正在检查更新，请稍候。"));
+            QMessageBox::warning(this, QString::fromUtf8(u8"无法启动更新器"),
+                QString::fromUtf8(u8"未找到或无法启动“飞船单机斗地主更新器.exe”。游戏可继续离线运行。"));
         }
         return;
     }
-    m_manualUpdateCheck = manual;
-    m_updateCheckInProgress = true;
-    if (manual) statusBar()->showMessage(QString::fromUtf8(u8"正在检查更新……"));
-    m_updateService->checkForUpdates(QCoreApplication::applicationVersion());
-}
-
-void MainWindow::handleUpdateCheckFinished(const UpdateCheckResult& result) {
-    const bool manual = m_manualUpdateCheck;
-    m_manualUpdateCheck = false;
-    m_updateCheckInProgress = false;
-    statusBar()->clearMessage();
-
-    if (!result.success) {
-        if (manual) {
-            QMessageBox::warning(this, QString::fromUtf8(u8"检查更新失败"),
-                                 result.errorMessage);
-        }
-        return;
-    }
-
     if (!manual) {
         m_settings.lastAutomaticUpdateCheckDate =
             QDate::currentDate().toString(Qt::ISODate);
         saveSettings();
     }
-    if (!result.updateAvailable) {
-        if (manual) {
-            QMessageBox::information(this, QString::fromUtf8(u8"检查更新"),
-                QString::fromUtf8(u8"当前已是最新版本：") +
-                    QCoreApplication::applicationVersion());
-        }
-        return;
-    }
-    if (!manual && m_settings.ignoredUpdateVersion == result.latestVersion) return;
-
-    QMessageBox box(QMessageBox::Information,
-                    QString::fromUtf8(u8"发现新版本 ") + result.latestVersion,
-                    result.releaseNotes.trimmed().isEmpty()
-                        ? QString::fromUtf8(u8"发现新的稳定版本，是否立即更新？")
-                        : result.releaseNotes,
-                    QMessageBox::NoButton, this);
-    box.setAccessibleName(QString::fromUtf8(u8"软件更新提示"));
-    auto* updateButton = box.addButton(QString::fromUtf8(u8"立即更新"),
-                                       QMessageBox::AcceptRole);
-    auto* ignoreButton = box.addButton(QString::fromUtf8(u8"忽略此版本"),
-                                       QMessageBox::ActionRole);
-    auto* disableButton = box.addButton(QString::fromUtf8(u8"以后不再提醒"),
-                                        QMessageBox::RejectRole);
-    box.exec();
-    if (box.clickedButton() == updateButton) {
-        startUpdateDownload(result);
-    } else if (box.clickedButton() == ignoreButton) {
-        m_settings.ignoredUpdateVersion = result.latestVersion;
-        saveSettings();
-    } else if (box.clickedButton() == disableButton) {
-        m_settings.automaticUpdateChecks = false;
-        saveSettings();
-    }
-}
-
-void MainWindow::startUpdateDownload(const UpdateCheckResult& update) {
-    if (!m_updateService || m_updateProgressDialog) return;
-    m_updateProgressDialog = new QProgressDialog(
-        QString::fromUtf8(u8"正在下载安装包并校验 SHA-256……"),
-        QString::fromUtf8(u8"取消"), 0, 0, this);
-    m_updateProgressDialog->setWindowTitle(QString::fromUtf8(u8"软件更新"));
-    m_updateProgressDialog->setAccessibleName(QString::fromUtf8(u8"更新下载进度"));
-    m_updateProgressDialog->setWindowModality(Qt::WindowModal);
-    m_updateProgressDialog->setMinimumDuration(0);
-    connect(m_updateProgressDialog, &QProgressDialog::canceled,
-            m_updateService.get(), &UpdateService::cancel);
-    m_updateProgressDialog->show();
-    m_updateService->downloadAndVerify(update);
-}
-
-void MainWindow::handleUpdateDownloadFinished(const QString& installerPath,
-                                              const QString& errorMessage) {
-    if (m_updateProgressDialog) {
-        m_updateProgressDialog->close();
-        m_updateProgressDialog->deleteLater();
-        m_updateProgressDialog = nullptr;
-    }
-    if (!errorMessage.isEmpty()) {
-        QMessageBox::critical(this, QString::fromUtf8(u8"更新失败"), errorMessage);
-        return;
-    }
-    const QFileInfo installer(installerPath);
-    if (!installer.exists() || installer.suffix().compare(QStringLiteral("exe"),
-                                                           Qt::CaseInsensitive) != 0) {
-        QMessageBox::critical(this, QString::fromUtf8(u8"更新失败"),
-                              QString::fromUtf8(u8"安装包不存在或不是 EXE 文件。"));
-        return;
-    }
-    if (!QProcess::startDetached(installer.absoluteFilePath(),
-                                 {QStringLiteral("/CLOSEAPPLICATIONS"),
-                                  QStringLiteral("/RESTARTAPPLICATIONS")})) {
-        QMessageBox::critical(this, QString::fromUtf8(u8"更新失败"),
-                              QString::fromUtf8(u8"无法启动更新安装包。"));
-        return;
-    }
-    m_forceExitRequested = true;
-    QCoreApplication::quit();
 }
 
 void MainWindow::openSettingsDialog() {
@@ -2837,39 +2661,6 @@ void MainWindow::moveHandCursorTo(int row) {
     }
 }
 
-void MainWindow::checkTrainingInstallExitRequest() {
-    const QString path = DataPaths::modelInstallExitRequestFile();
-    QFile file(path);
-    if (!file.exists() || !file.open(QIODevice::ReadOnly)) return;
-    QJsonParseError parseError;
-    const auto request = QJsonDocument::fromJson(file.readAll(), &parseError).object();
-    file.close();
-    const QDateTime requestedAt = QDateTime::fromString(
-        request.value(QStringLiteral("requestedAtUtc")).toString(), Qt::ISODate);
-    const bool valid = parseError.error == QJsonParseError::NoError &&
-        request.value(QStringLiteral("schemaVersion")).toInt() == 1 &&
-        request.value(QStringLiteral("request")).toString() ==
-            QStringLiteral("install_tier_models") &&
-        requestedAt.isValid() && requestedAt.secsTo(QDateTime::currentDateTimeUtc()) >= 0 &&
-        requestedAt.secsTo(QDateTime::currentDateTimeUtc()) <= 120;
-    QFile::remove(path);
-    if (!valid) return;
-
-    const auto phase = m_engine.state().phase();
-    if (phase == GamePhase::Bidding || phase == GamePhase::Playing ||
-        phase == GamePhase::Paused) {
-        GameCommand abandon;
-        abandon.type = GameCommandType::AbandonGame;
-        m_engine.execute(abandon);
-    }
-    if (m_aiTimer) m_aiTimer->stop();
-    if (m_turnCountdownTimer) m_turnCountdownTimer->stop();
-    if (m_sound) m_sound->stopAll();
-    saveSettings();
-    m_forceExitRequested = true;
-    QTimer::singleShot(0, qApp, &QApplication::closeAllWindows);
-}
-
 void MainWindow::announceCurrentCard() {
     if (!m_handView || !m_handModel) return;
     const auto currentIndex = m_handView->currentIndex();
@@ -2901,7 +2692,7 @@ QString MainWindow::buildDiagnosticReport() const {
     const auto snapshot = m_engine.state().publicSnapshot();
     const QWidget* focus = QApplication::focusWidget();
 
-    out << "飞船AI斗地主单机版诊断报告\n";
+    out << "飞船单机斗地主诊断报告\n";
     out << "报告格式版本: 6\n";
     out << "生成时间: " << QDateTime::currentDateTime().toString(Qt::ISODateWithMs) << "\n";
     out << "应用版本: " << QCoreApplication::applicationVersion() << "\n";
@@ -2923,7 +2714,7 @@ QString MainWindow::buildDiagnosticReport() const {
 
     out << "\n[关键组件]\n";
     const QStringList components = {
-        QStringLiteral("FourPlayerDoudizhu.exe"), QStringLiteral("Qt6Core.dll"),
+        QString::fromUtf8(u8"飞船单机斗地主.exe"), QStringLiteral("Qt6Core.dll"),
         QStringLiteral("Qt6Gui.dll"), QStringLiteral("Qt6Widgets.dll"),
         QStringLiteral("platforms/qwindows.dll")
     };
@@ -3242,7 +3033,11 @@ void MainWindow::announcePlayerAtPosition(int position) {
 void MainWindow::announceBottomCards() {
     const auto snapshot = m_engine.publicSnapshot();
     if (!snapshot.bottomCardsRevealed || snapshot.bottomCards.size() != BOTTOM_CARDS) {
-        announce(L"当前没有底牌", AnnouncementCategory::System);
+        if (snapshot.phase == GamePhase::Bidding) {
+            announce(L"底牌尚未公开", AnnouncementCategory::System);
+        } else {
+            announce(L"当前没有公开底牌", AnnouncementCategory::System);
+        }
         return;
     }
 
@@ -3263,23 +3058,21 @@ void MainWindow::announceBottomCards() {
 
 int MainWindow::announceNewDealBottomCards(const CommandResult& result,
                                            int initialDelayMilliseconds) {
-    const bool containsDeal = std::any_of(result.events.begin(), result.events.end(),
-        [](const GameEvent& event) { return event.type == GameEventType::CardsDealt; });
+    const bool containsReveal = std::any_of(result.events.begin(), result.events.end(),
+        [](const GameEvent& event) {
+            return event.type == GameEventType::BottomCardsRevealed;
+        });
     const auto snapshot = m_engine.publicSnapshot();
-    if (!containsDeal || snapshot.phase != GamePhase::Bidding ||
+    if (!containsReveal || snapshot.phase != GamePhase::Playing ||
         !snapshot.bottomCardsRevealed || snapshot.bottomCards.size() != BOTTOM_CARDS ||
         m_bottomCardsAnnouncedGameId == snapshot.gameId) {
         return 0;
     }
 
     m_bottomCardsAnnouncedGameId = snapshot.gameId;
-    std::wstring text = L"游戏开始，已经发牌。底牌：";
+    std::wstring text = L"地主已经确定。公开底牌：";
     text += CardTextFormatter::formatPublicCards(snapshot.bottomCards);
-    if (snapshot.currentPlayer == PlayerId::Player1) {
-        text += L"。现在轮到你叫分，可按0不叫，按1、2、3叫分";
-    } else {
-        text += L"。现在由" + playerDisplayName(snapshot.currentPlayer) + L"叫分";
-    }
+    text += L"。地主先出牌";
     if (m_diagnosticTrace) {
         const QJsonObject details{
             {QStringLiteral("game_id"), static_cast<qint64>(snapshot.gameId)},
@@ -3288,7 +3081,7 @@ int MainWindow::announceNewDealBottomCards(const CommandResult& result,
             {QStringLiteral("route"), QString::fromStdWString(m_accessibility.routeName())},
             {QStringLiteral("result"), QStringLiteral("delivered")}};
         QJsonObject revealed = details;
-        revealed[QStringLiteral("type")] = QStringLiteral("bottom_cards_revealed_for_bidding");
+        revealed[QStringLiteral("type")] = QStringLiteral("bottom_cards_revealed");
         m_diagnosticTrace->record(revealed);
         QJsonObject announced = details;
         announced[QStringLiteral("type")] = QStringLiteral("bottom_cards_announced");

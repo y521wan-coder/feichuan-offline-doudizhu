@@ -3,7 +3,7 @@
 file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/version.txt" FPDZ_VERSION LIMIT_COUNT 1)
 string(STRIP "${FPDZ_VERSION}" FPDZ_VERSION)
 
-project(FourPlayerDoudizhu
+project(FeichuanOfflineDoudizhu
     VERSION ${FPDZ_VERSION}
     DESCRIPTION "Four Player Doudizhu - Accessible Windows Desktop Game"
     LANGUAGES CXX
@@ -52,7 +52,9 @@ fpdz_apply_warnings(fpdz_core)
 
 # AI library
 add_library(fpdz_ai STATIC
-    src/ai/heuristic_model.cpp
+    src/ai/ai_level_profile.cpp
+    src/ai/farmer_team_strategy.cpp
+    src/ai/landlord_strategy.cpp
     src/ai/legal_move_generator.cpp
     src/ai/bidding_strategy.cpp
     src/ai/simple_ai.cpp
@@ -94,12 +96,11 @@ add_library(fpdz_app STATIC
     src/app/application.cpp
     src/app/service_registry.cpp
     src/app/app_settings.cpp
-    src/app/update_service.cpp
 )
 target_include_directories(fpdz_app PUBLIC "${CMAKE_SOURCE_DIR}/src")
 target_link_libraries(fpdz_app PUBLIC
     fpdz_core fpdz_ai fpdz_persistence fpdz_accessibility
-    PRIVATE Qt6::Core Qt6::Widgets Qt6::Network
+    PRIVATE Qt6::Core Qt6::Widgets
 )
 target_compile_definitions(fpdz_app PRIVATE FPDZ_APP_VERSION="${FPDZ_VERSION}")
 fpdz_apply_warnings(fpdz_app)
@@ -125,56 +126,88 @@ add_library(fpdz_ui STATIC
 target_include_directories(fpdz_ui PUBLIC "${CMAKE_SOURCE_DIR}/src")
 target_link_libraries(fpdz_ui PUBLIC
     fpdz_core fpdz_ai fpdz_accessibility fpdz_app
-    PRIVATE Qt6::Core Qt6::Widgets Qt6::Network winmm.lib
+    PRIVATE Qt6::Core Qt6::Widgets winmm.lib
 )
 set_target_properties(fpdz_ui PROPERTIES AUTOMOC ON AUTORCC ON)
 fpdz_apply_warnings(fpdz_ui)
 
 # Main executable
-add_executable(FourPlayerDoudizhu
+add_executable(FeichuanOfflineDoudizhu
     src/main.cpp
-    resources/app.qrc
+    assets/app.qrc
 )
-target_link_libraries(FourPlayerDoudizhu PRIVATE
+target_link_libraries(FeichuanOfflineDoudizhu PRIVATE
     fpdz_app fpdz_ui fpdz_core fpdz_ai fpdz_persistence fpdz_accessibility
-    Qt6::Core Qt6::Widgets Qt6::Network winmm.lib
+    Qt6::Core Qt6::Widgets winmm.lib
 )
-set_target_properties(FourPlayerDoudizhu PROPERTIES
+set_target_properties(FeichuanOfflineDoudizhu PROPERTIES
+    OUTPUT_NAME "飞船单机斗地主"
     WIN32_EXECUTABLE $<CONFIG:Release>
     AUTOMOC ON
     AUTORCC ON
 )
-fpdz_apply_warnings(FourPlayerDoudizhu)
+fpdz_apply_warnings(FeichuanOfflineDoudizhu)
 
 # Deploy Qt DLLs alongside the executable after build
 get_filename_component(_qt6_root "${Qt6_DIR}/../../.." ABSOLUTE)
 set(_qt6_bin "${_qt6_root}/bin")
 set(_qt6_plugins "${_qt6_root}/plugins")
-add_custom_command(TARGET FourPlayerDoudizhu POST_BUILD
+add_custom_command(TARGET FeichuanOfflineDoudizhu POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${_qt6_bin}/Qt6Core$<$<CONFIG:Debug>:d>.dll"
+        "${_qt6_bin}/Qt6Gui$<$<CONFIG:Debug>:d>.dll"
+        "${_qt6_bin}/Qt6Widgets$<$<CONFIG:Debug>:d>.dll"
+        "$<TARGET_FILE_DIR:FeichuanOfflineDoudizhu>"
+    COMMAND ${CMAKE_COMMAND} -E make_directory
+        "$<TARGET_FILE_DIR:FeichuanOfflineDoudizhu>/platforms"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${_qt6_plugins}/platforms/qwindows$<$<CONFIG:Debug>:d>.dll"
+        "$<TARGET_FILE_DIR:FeichuanOfflineDoudizhu>/platforms"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${CMAKE_SOURCE_DIR}/assets/sounds"
+        "$<TARGET_FILE_DIR:FeichuanOfflineDoudizhu>/resources/sounds"
+    COMMAND ${CMAKE_COMMAND} -E rm -f
+        "$<TARGET_FILE_DIR:FeichuanOfflineDoudizhu>/nvdaControllerClient64.dll"
+    COMMAND ${CMAKE_COMMAND} -E rm -f
+        "$<TARGET_FILE_DIR:FeichuanOfflineDoudizhu>/licenses/NVDA-Controller-Client-LGPL-2.1.txt"
+    COMMAND ${CMAKE_COMMAND} -E rm -f
+        "$<TARGET_FILE_DIR:FeichuanOfflineDoudizhu>/Qt6Sql.dll"
+        "$<TARGET_FILE_DIR:FeichuanOfflineDoudizhu>/Qt6Concurrent.dll"
+    COMMAND ${CMAKE_COMMAND} -E remove_directory
+        "$<TARGET_FILE_DIR:FeichuanOfflineDoudizhu>/sqldrivers"
+    COMMENT "Deploying Qt DLLs for FeichuanOfflineDoudizhu"
+)
+
+# Independent Windows updater. This is the only product target that links Qt Network.
+add_executable(FeichuanOfflineDoudizhuUpdater
+    apps/updater/main.cpp
+    apps/updater/update_service.cpp
+    apps/updater/update_service.h
+    apps/updater/signature_verifier.cpp
+    apps/updater/signature_verifier.h
+)
+target_include_directories(FeichuanOfflineDoudizhuUpdater PRIVATE
+    "${CMAKE_SOURCE_DIR}/apps/updater"
+)
+target_link_libraries(FeichuanOfflineDoudizhuUpdater PRIVATE
+    Qt6::Core Qt6::Widgets Qt6::Network wintrust crypt32
+)
+target_compile_definitions(FeichuanOfflineDoudizhuUpdater PRIVATE
+    FPDZ_APP_VERSION="${FPDZ_VERSION}"
+)
+set_target_properties(FeichuanOfflineDoudizhuUpdater PROPERTIES
+    OUTPUT_NAME "飞船单机斗地主更新器"
+    WIN32_EXECUTABLE $<CONFIG:Release>
+    AUTOMOC ON
+)
+fpdz_apply_warnings(FeichuanOfflineDoudizhuUpdater)
+add_custom_command(TARGET FeichuanOfflineDoudizhuUpdater POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         "${_qt6_bin}/Qt6Core$<$<CONFIG:Debug>:d>.dll"
         "${_qt6_bin}/Qt6Gui$<$<CONFIG:Debug>:d>.dll"
         "${_qt6_bin}/Qt6Widgets$<$<CONFIG:Debug>:d>.dll"
         "${_qt6_bin}/Qt6Network$<$<CONFIG:Debug>:d>.dll"
-        "$<TARGET_FILE_DIR:FourPlayerDoudizhu>"
-    COMMAND ${CMAKE_COMMAND} -E make_directory
-        "$<TARGET_FILE_DIR:FourPlayerDoudizhu>/platforms"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "${_qt6_plugins}/platforms/qwindows$<$<CONFIG:Debug>:d>.dll"
-        "$<TARGET_FILE_DIR:FourPlayerDoudizhu>/platforms"
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-        "${CMAKE_SOURCE_DIR}/resources/sounds"
-        "$<TARGET_FILE_DIR:FourPlayerDoudizhu>/resources/sounds"
-    COMMAND ${CMAKE_COMMAND} -E rm -f
-        "$<TARGET_FILE_DIR:FourPlayerDoudizhu>/nvdaControllerClient64.dll"
-    COMMAND ${CMAKE_COMMAND} -E rm -f
-        "$<TARGET_FILE_DIR:FourPlayerDoudizhu>/licenses/NVDA-Controller-Client-LGPL-2.1.txt"
-    COMMAND ${CMAKE_COMMAND} -E rm -f
-        "$<TARGET_FILE_DIR:FourPlayerDoudizhu>/Qt6Sql.dll"
-        "$<TARGET_FILE_DIR:FourPlayerDoudizhu>/Qt6Concurrent.dll"
-    COMMAND ${CMAKE_COMMAND} -E remove_directory
-        "$<TARGET_FILE_DIR:FourPlayerDoudizhu>/sqldrivers"
-    COMMENT "Deploying Qt DLLs for FourPlayerDoudizhu"
+        "$<TARGET_FILE_DIR:FeichuanOfflineDoudizhuUpdater>"
 )
 # Testing
 enable_testing()

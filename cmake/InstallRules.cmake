@@ -2,7 +2,7 @@
 
 include(GNUInstallDirs)
 
-install(TARGETS FourPlayerDoudizhu
+install(TARGETS FeichuanOfflineDoudizhu FeichuanOfflineDoudizhuUpdater
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
 
@@ -18,7 +18,14 @@ if(WINDEPLOYQT_EXECUTABLE)
                 --no-translations
                 --no-system-d3d-compiler
                 --no-opengl-sw
-                \"\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}/FourPlayerDoudizhu.exe\"
+                \"\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}/飞船单机斗地主.exe\"
+        )
+        execute_process(
+            COMMAND \"${WINDEPLOYQT_EXECUTABLE}\"
+                --no-translations
+                --no-system-d3d-compiler
+                --no-opengl-sw
+                \"\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}/飞船单机斗地主更新器.exe\"
         )
     ")
 endif()

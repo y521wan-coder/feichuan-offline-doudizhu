@@ -1,24 +1,23 @@
-﻿# 构建指南
+# 构建指南
 
-## 环境要求
-- Visual Studio 2022 Build Tools (MSVC 14.50+)
+## 依赖
+
+- Windows x64
+- MSVC Build Tools
 - CMake 3.24+
-- Ninja 1.12+
-- Qt 6.8.3 MSVC2022 x64，项目内路径：`D:\FourPlayerDoudizhu\Qt\6.8.3\msvc2022_64`
+- Ninja
+- Qt 6.8.x MSVC x64，包含 Core、Gui、Widgets、Network、Test
 
-Qt 目录已经纳入项目根目录统一管理，但不纳入 Git。不要删除 `D:\FourPlayerDoudizhu\Qt`，否则无法继续本地构建。
+游戏本体不链接 Qt Network；该模块仅由独立更新器和更新器测试使用。
 
-## 配置
-```
-cmake --preset=debug-x64
+默认预设在项目根目录的 `Qt/6.8.3/msvc2022_64` 查找 Qt。也可在配置时显式传入：
+
+```powershell
+cmake -S . -B build/debug-x64 -G Ninja `
+  -DCMAKE_BUILD_TYPE=Debug `
+  -DCMAKE_PREFIX_PATH=C:/Qt/6.8.3/msvc2022_64
+cmake --build build/debug-x64
+ctest --test-dir build/debug-x64 --output-on-failure
 ```
 
-## 构建
-```
-cmake --build --preset=debug-x64
-```
-
-## 测试
-```
-cd build/debug-x64 && ctest --output-on-failure
-```
+发布构建使用 `tools/build_release.ps1`，产物只能写入 `artifacts/` 与 `releases/`。

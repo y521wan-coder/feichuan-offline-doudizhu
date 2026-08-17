@@ -27,10 +27,14 @@ struct GameCommand {
     PlayerId playerId = PlayerId::Player1;
     int bidValue = 0;
     std::vector<CardId> cardIds;
-    // No value means a real game using operating-system entropy. Tests and
-    // training pass a seed to obtain a stable, reproducible deal.
+    // No value means a real game using operating-system entropy. Tests pass a
+    // seed to obtain a stable, reproducible deal.
     std::optional<uint64_t> randomSeed;
     bool allowPassAsLeader = false;
+    // AI-only diagnostic metadata. It must contain a stable reason code and
+    // public-information facts only; the engine never uses it for validation.
+    std::string aiDecisionReason;
+    bool aiTeamRuleException = false;
 };
 
 enum class ErrorCode : uint16_t {

@@ -1,21 +1,21 @@
 #pragma once
 
 #include "ai_difficulty.h"
+#include "ai_level_profile.h"
 #include "../core/model/hand.h"
-#include "../core/model/card.h"
-#include "heuristic_model.h"
+
 #include <cstdint>
-#include <vector>
 
 namespace fpdz {
 
 class BiddingStrategy {
 public:
-    static int decideBid(const Hand& hand, const std::vector<Card>& publicBottomCards,
-                         int currentHighestBid,
+    // Bidding is intentionally based on the player's 25-card hand only.
+    // Advanced probability sampling creates hypothetical bottoms from the
+    // unknown pool and never receives the actual hidden bottom cards.
+    static int decideBid(const Hand& hand, int currentHighestBid,
                          AiDifficulty difficulty = AiDifficulty::Beginner,
-                         uint64_t randomSalt = 0,
-                         const HeuristicWeights& weights = HeuristicWeights::defaults());
+                         uint64_t randomSalt = 0);
 };
 
 } // namespace fpdz

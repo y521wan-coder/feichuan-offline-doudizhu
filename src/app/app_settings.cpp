@@ -123,12 +123,7 @@ QJsonObject AppSettings::toJson() const {
 
 AppSettings AppSettings::fromJson(const QJsonObject& json) {
     AppSettings settings;
-    const int storedDifficulty = jsonInt(json, "aiDifficulty", settings.aiDifficulty);
-    if (storedDifficulty == 3) {
-        settings.aiDifficulty = static_cast<int>(AiDifficulty::Master);
-    } else {
-        settings.aiDifficulty = storedDifficulty;
-    }
+    settings.aiDifficulty = jsonInt(json, "aiDifficulty", settings.aiDifficulty);
     settings.aiDelay = jsonInt(json, "aiDelay", settings.aiDelay);
     settings.autoNextRound = jsonBool(json, "autoNextRound", settings.autoNextRound);
     settings.confirmBeforePlay = jsonBool(json, "confirmBeforePlay", settings.confirmBeforePlay);

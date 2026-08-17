@@ -5,7 +5,7 @@ namespace fpdz {
 enum class AiDifficulty {
     Beginner = 0,
     Intermediate = 1,
-    Master = 2
+    Advanced = 2
 };
 
 } // namespace fpdz

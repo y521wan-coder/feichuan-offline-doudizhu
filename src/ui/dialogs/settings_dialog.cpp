@@ -31,7 +31,7 @@ SettingsDialog::SettingsDialog(const AppSettings& settings, QWidget* parent)
     m_aiDifficulty->setObjectName(QStringLiteral("aiModeComboBox"));
     m_aiDifficulty->addItem(QString::fromStdWString(L"初级"), static_cast<int>(AiDifficulty::Beginner));
     m_aiDifficulty->addItem(QString::fromStdWString(L"中级"), static_cast<int>(AiDifficulty::Intermediate));
-    m_aiDifficulty->addItem(QString::fromStdWString(L"大师级"), static_cast<int>(AiDifficulty::Master));
+    m_aiDifficulty->addItem(QString::fromStdWString(L"高级"), static_cast<int>(AiDifficulty::Advanced));
     const int difficultyIndex = m_aiDifficulty->findData(settings.aiDifficulty);
     m_aiDifficulty->setCurrentIndex(difficultyIndex >= 0 ? difficultyIndex : 0);
     form->addRow(QString::fromStdWString(L"机器人模式"), m_aiDifficulty);

@@ -46,6 +46,6 @@ settings.json
 Thumbs.db
 Desktop.ini
 
-# Temp files
-test_*.cpp
-test_*.txt
+# Temp files (repository tests are intentionally tracked)
+*.tmp
+aqtinstall.log
