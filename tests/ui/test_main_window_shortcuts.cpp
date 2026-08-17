@@ -1082,7 +1082,7 @@ private slots:
 
         auto* statusLabel = window.statusBar()->findChild<QLabel*>();
         QVERIFY(statusLabel);
-        QTest::keyClick(&window, Qt::Key_1, Qt::AltModifier);
+        QTest::keyClick(&window, Qt::Key_1);
         QVERIFY(statusLabel->text().contains(QString::fromUtf8(u8"测试东家")));
         QVERIFY(!statusLabel->text().contains(QString::fromUtf8(u8"玩家一")));
     }
@@ -1294,17 +1294,21 @@ private slots:
         QCOMPARE(fs.players[0].role, Role::Landlord);
         QCOMPARE(fs.players[0].hand.size(), LANDLORD_TOTAL);
 
+        statusLabel->setText(QString::fromUtf8(u8"Alt数字快捷键已取消"));
         QTest::keyClick(&window, Qt::Key_1, Qt::AltModifier);
+        QCOMPARE(statusLabel->text(), QString::fromUtf8(u8"Alt数字快捷键已取消"));
+
+        QTest::keyClick(&window, Qt::Key_1);
         QVERIFY(statusLabel->text().contains(QString::fromUtf8(u8"东风")));
         QVERIFY(statusLabel->text().contains(QString::fromUtf8(u8"自己")));
         QVERIFY(!statusLabel->text().contains(QString::fromUtf8(u8"玩家一")));
-        QTest::keyClick(&window, Qt::Key_2, Qt::AltModifier);
+        QTest::keyClick(&window, Qt::Key_2);
         QVERIFY(statusLabel->text().contains(QString::fromUtf8(u8"南风")));
         QVERIFY(!statusLabel->text().contains(QString::fromUtf8(u8"玩家二")));
-        QTest::keyClick(&window, Qt::Key_3, Qt::AltModifier);
+        QTest::keyClick(&window, Qt::Key_3);
         QVERIFY(statusLabel->text().contains(QString::fromUtf8(u8"西风")));
         QVERIFY(!statusLabel->text().contains(QString::fromUtf8(u8"玩家三")));
-        QTest::keyClick(&window, Qt::Key_4, Qt::AltModifier);
+        QTest::keyClick(&window, Qt::Key_4);
         QVERIFY(statusLabel->text().contains(QString::fromUtf8(u8"北风")));
         QVERIFY(!statusLabel->text().contains(QString::fromUtf8(u8"玩家四")));
         QTest::keyClick(&window, Qt::Key_F2);
@@ -1409,6 +1413,34 @@ private slots:
         QCOMPARE(fs.consecutivePasses, 1);
         QCOMPARE(fs.currentPlayer, PlayerId::Player2);
         QVERIFY(!statusLabel->text().contains(QString::fromUtf8(u8"过牌")));
+    }
+
+    void testNativePlainNumberQueriesPlayersAndAltNumberIsReleased() {
+#ifdef Q_OS_WIN
+        writeCustomPlayerNames();
+        GameEngine engine;
+        engine.state().setPhase(GamePhase::Playing);
+        AccessibilityService accessibility;
+        MainWindow window(engine, accessibility);
+        window.show();
+        QVERIFY(QTest::qWaitForWindowActive(&window));
+
+        auto* statusLabel = window.statusBar()->findChild<QLabel*>();
+        QVERIFY(statusLabel);
+        constexpr UINT keyboardHookMessage = WM_APP + 0x4F;
+        constexpr LPARAM altFlag = 0x04;
+        const HWND windowHandle = reinterpret_cast<HWND>(window.winId());
+
+        QVERIFY(PostMessageW(windowHandle, keyboardHookMessage, '2', 0));
+        QTRY_VERIFY(statusLabel->text().contains(QString::fromUtf8(u8"南风")));
+
+        statusLabel->setText(QString::fromUtf8(u8"Alt数字快捷键已释放"));
+        QVERIFY(PostMessageW(windowHandle, keyboardHookMessage, '2', altFlag));
+        QTest::qWait(50);
+        QCOMPARE(statusLabel->text(), QString::fromUtf8(u8"Alt数字快捷键已释放"));
+#else
+        QSKIP("Windows native keyboard hook path only");
+#endif
     }
 
     void testNativeF11AnnouncesCurrentPlayerName() {

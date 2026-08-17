@@ -192,10 +192,6 @@ constexpr LPARAM kHookKeyUpFlag = 0x08;
 constexpr int kHookScanShift = 8;
 constexpr int kHotkeyF11 = 0x4F11;
 constexpr int kHotkeyF12 = 0x4F12;
-constexpr int kHotkeyAlt1 = 0x4A01;
-constexpr int kHotkeyAlt2 = 0x4A02;
-constexpr int kHotkeyAlt3 = 0x4A03;
-constexpr int kHotkeyAlt4 = 0x4A04;
 constexpr int kHotkeyAltF = 0x4A0F;
 
 HHOOK g_keyboardHook = nullptr;
@@ -254,9 +250,7 @@ bool shouldYieldKeyboardHandlingToFocusedWidget() {
 
 bool isKeyboardHookCandidate(DWORD virtualKey, bool altDown) {
     if (altDown) {
-        return virtualKey == '1' || virtualKey == '2' || virtualKey == '3' ||
-               virtualKey == '4' ||
-               virtualKey == 'F' || virtualKey == 'X';
+        return virtualKey == 'F' || virtualKey == 'X';
     }
 
     switch (virtualKey) {
@@ -275,7 +269,7 @@ bool isKeyboardHookCandidate(DWORD virtualKey, bool altDown) {
     case VK_SPACE:
         return true;
     default:
-        return virtualKey >= '0' && virtualKey <= '3';
+        return virtualKey >= '0' && virtualKey <= '4';
     }
 }
 
@@ -284,7 +278,8 @@ bool isSingleFireKey(DWORD virtualKey) {
            virtualKey == VK_F11 || virtualKey == VK_F12 ||
            virtualKey == VK_HOME || virtualKey == VK_END ||
            virtualKey == VK_UP || virtualKey == VK_DOWN ||
-           virtualKey == VK_RETURN || virtualKey == VK_SPACE;
+           virtualKey == VK_RETURN || virtualKey == VK_SPACE ||
+           (virtualKey >= '1' && virtualKey <= '4');
 }
 
 LRESULT CALLBACK lowLevelKeyboardProc(int code, WPARAM wParam, LPARAM lParam) {
@@ -876,22 +871,6 @@ void MainWindow::setupShortcuts() {
     addApplicationShortcut(QKeySequence(Qt::Key_F12), [this]() {
         announceLastAction();
     });
-    addApplicationShortcut(QKeySequence(Qt::ALT | Qt::Key_1), [this]() {
-        dismissMenusForGameAction();
-        announcePlayerAtPosition(1);
-    });
-    addApplicationShortcut(QKeySequence(Qt::ALT | Qt::Key_2), [this]() {
-        dismissMenusForGameAction();
-        announcePlayerAtPosition(2);
-    });
-    addApplicationShortcut(QKeySequence(Qt::ALT | Qt::Key_3), [this]() {
-        dismissMenusForGameAction();
-        announcePlayerAtPosition(3);
-    });
-    addApplicationShortcut(QKeySequence(Qt::ALT | Qt::Key_4), [this]() {
-        dismissMenusForGameAction();
-        announcePlayerAtPosition(4);
-    });
     addApplicationShortcut(QKeySequence(Qt::Key_F2), [this]() {
         triggerBottomCardsShortcut(QStringLiteral("qt_shortcut"));
     });
@@ -1466,11 +1445,12 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event) {
             return QMainWindow::eventFilter(watched, event);
         }
         auto* keyEvent = static_cast<QKeyEvent*>(event);
+        const bool keypadKey = keyEvent->modifiers().testFlag(Qt::KeypadModifier);
         const auto modifiers = keyEvent->modifiers() & ~Qt::KeypadModifier;
         const bool altQuery = (modifiers == Qt::AltModifier) &&
-            ((keyEvent->key() >= Qt::Key_1 && keyEvent->key() <= Qt::Key_4) ||
-             keyEvent->key() == Qt::Key_D ||
-             keyEvent->key() == Qt::Key_F);
+            (keyEvent->key() == Qt::Key_D || keyEvent->key() == Qt::Key_F);
+        const bool playerQuery = !keypadKey && modifiers == Qt::NoModifier &&
+            keyEvent->key() >= Qt::Key_1 && keyEvent->key() <= Qt::Key_4;
         const bool primaryShortcut =
             keyEvent->key() == Qt::Key_F1 ||
             keyEvent->key() == Qt::Key_F5 ||
@@ -1485,7 +1465,7 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event) {
             keyEvent->key() == Qt::Key_Return ||
             keyEvent->key() == Qt::Key_Enter ||
             (keyEvent->key() >= Qt::Key_0 && keyEvent->key() <= Qt::Key_3);
-        if (altQuery || primaryShortcut) {
+        if (altQuery || playerQuery || primaryShortcut) {
             keyEvent->accept();
         }
         return QMainWindow::eventFilter(watched, event);
@@ -1598,22 +1578,6 @@ bool MainWindow::handleWindowsMessage(void* message, qintptr* result) {
             announceLastAction();
             if (result) *result = 1;
             return true;
-        case kHotkeyAlt1:
-            announcePlayerAtPosition(1);
-            if (result) *result = 1;
-            return true;
-        case kHotkeyAlt2:
-            announcePlayerAtPosition(2);
-            if (result) *result = 1;
-            return true;
-        case kHotkeyAlt3:
-            announcePlayerAtPosition(3);
-            if (result) *result = 1;
-            return true;
-        case kHotkeyAlt4:
-            announcePlayerAtPosition(4);
-            if (result) *result = 1;
-            return true;
         case kHotkeyAltF:
             announceScore();
             if (result) *result = 1;
@@ -1721,22 +1685,6 @@ bool MainWindow::handleNativeShortcut(
             close();
             return true;
         }
-        if (virtualKey == '1') {
-            announcePlayerAtPosition(1);
-            return true;
-        }
-        if (virtualKey == '2') {
-            announcePlayerAtPosition(2);
-            return true;
-        }
-        if (virtualKey == '3') {
-            announcePlayerAtPosition(3);
-            return true;
-        }
-        if (virtualKey == '4') {
-            announcePlayerAtPosition(4);
-            return true;
-        }
         if (virtualKey == 'F') {
             announceScore();
             return true;
@@ -1749,6 +1697,10 @@ bool MainWindow::handleNativeShortcut(
         noModifier &&
         virtualKey >= '0' && virtualKey <= '3') {
         onBid(static_cast<int>(virtualKey - '0'));
+        return true;
+    }
+    if (noModifier && virtualKey >= '1' && virtualKey <= '4') {
+        announcePlayerAtPosition(static_cast<int>(virtualKey - '1') + 1);
         return true;
     }
     if (isHumanBiddingTurn() && noModifier &&
@@ -1910,10 +1862,6 @@ void MainWindow::registerSystemHotkeys() {
 
     tryRegister(kHotkeyF11, MOD_NOREPEAT, VK_F11, L"F11");
     tryRegister(kHotkeyF12, MOD_NOREPEAT, VK_F12, L"F12");
-    tryRegister(kHotkeyAlt1, MOD_ALT | MOD_NOREPEAT, '1', L"Alt+1");
-    tryRegister(kHotkeyAlt2, MOD_ALT | MOD_NOREPEAT, '2', L"Alt+2");
-    tryRegister(kHotkeyAlt3, MOD_ALT | MOD_NOREPEAT, '3', L"Alt+3");
-    tryRegister(kHotkeyAlt4, MOD_ALT | MOD_NOREPEAT, '4', L"Alt+4");
     tryRegister(kHotkeyAltF, MOD_ALT | MOD_NOREPEAT, 'F', L"Alt+F");
 #endif
 }
@@ -1942,7 +1890,8 @@ bool MainWindow::handleKeyPress(QKeyEvent* event) {
         event->key() == Qt::Key_F12 || event->key() == Qt::Key_Home ||
         event->key() == Qt::Key_End || event->key() == Qt::Key_Up ||
         event->key() == Qt::Key_Down || event->key() == Qt::Key_Return ||
-        event->key() == Qt::Key_Enter;
+        event->key() == Qt::Key_Enter ||
+        (event->key() >= Qt::Key_1 && event->key() <= Qt::Key_4);
     if (singleFireKey && event->isAutoRepeat()) return true;
 
     if (navigationModifiers == Qt::AltModifier) {
@@ -1980,6 +1929,11 @@ bool MainWindow::handleKeyPress(QKeyEvent* event) {
         onBid(event->key() - Qt::Key_0);
         return true;
     }
+    if (!(modifiers & Qt::KeypadModifier) && navigationModifiers == Qt::NoModifier &&
+        event->key() >= Qt::Key_1 && event->key() <= Qt::Key_4) {
+        announcePlayerAtPosition(event->key() - Qt::Key_1 + 1);
+        return true;
+    }
     if (isHumanBiddingTurn() && navigationModifiers == Qt::NoModifier &&
         (event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter ||
          event->key() == Qt::Key_Space)) {
@@ -1998,10 +1952,6 @@ bool MainWindow::handleKeyPress(QKeyEvent* event) {
     }
 
     if ((modifiers & Qt::AltModifier) && !(modifiers & Qt::KeypadModifier)) {
-        if (event->key() >= Qt::Key_1 && event->key() <= Qt::Key_4) {
-            announcePlayerAtPosition(event->key() - Qt::Key_1 + 1);
-            return true;
-        }
         if (event->key() == Qt::Key_F) {
             announceScore();
             return true;
