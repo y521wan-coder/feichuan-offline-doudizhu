@@ -64,6 +64,7 @@ add_library(fpdz_ai STATIC
     src/ai/bidding_strategy.cpp
     src/ai/simple_ai.cpp
     src/ai/standard_ai.cpp
+    src/ai/strategic_search_evaluator.cpp
     src/ai/hint_service.cpp
 )
 target_include_directories(fpdz_ai PUBLIC "${CMAKE_SOURCE_DIR}/src")
@@ -116,6 +117,8 @@ add_library(fpdz_ui STATIC
     src/ui/models/hand_list_model.cpp
     src/ui/models/player_status_model.cpp
     src/ui/widgets/hand_view.cpp
+    src/ui/widgets/card_table_widget.cpp
+    src/ui/widgets/card_table_widget.h
     src/ui/widgets/game_status_widget.h
     src/ui/widgets/game_status_widget.cpp
     src/ui/widgets/player_status_widget.cpp

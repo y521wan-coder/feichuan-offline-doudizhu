@@ -2,6 +2,7 @@
 #include "models/hand_list_model.h"
 #include "models/player_status_model.h"
 #include "widgets/game_status_widget.h"
+#include "widgets/card_table_widget.h"
 #include "dialogs/settings_dialog.h"
 #include "dialogs/sound_manager_dialog.h"
 #include "dialogs/result_dialog.h"
@@ -39,6 +40,7 @@
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QMessageBox>
+#include <QAbstractButton>
 #include <QProcess>
 #include <QOperatingSystemVersion>
 #include <QSysInfo>
@@ -79,6 +81,34 @@ const auto kRulesFileName = u8"飞船单机斗地主玩法说明.txt";
 const auto kShortcutsFileName = u8"飞船单机斗地主快捷键说明.txt";
 const auto kSoundGuideFileName = u8"飞船单机斗地主音效分类与替换说明.txt";
 const auto kChangelogFileName = u8"飞船单机斗地主更新日志.txt";
+
+std::wstring formatCardSelectionGroup(Rank rank, int count) {
+    // Picking up and putting down a rank group must use exactly the same
+    // wording as left/right hand navigation (for example, "3张3").
+    return CardTextFormatter::formatSameRankSpeech(rank, count);
+}
+
+std::wstring formatCardSelection(const std::vector<Card>& cards) {
+    std::vector<std::pair<Rank, int>> groups;
+    for (const auto& card : cards) {
+        if (!card.isValid()) continue;
+        auto group = std::find_if(groups.begin(), groups.end(), [&card](const auto& entry) {
+            return entry.first == card.rank();
+        });
+        if (group == groups.end()) {
+            groups.push_back({card.rank(), 1});
+        } else {
+            ++group->second;
+        }
+    }
+
+    std::wstring text;
+    for (const auto& [rank, count] : groups) {
+        if (!text.empty()) text += L"、";
+        text += formatCardSelectionGroup(rank, count);
+    }
+    return text;
+}
 
 QString redactedPath(QString path) {
     const QString home = QDir::homePath();
@@ -398,8 +428,8 @@ LRESULT CALLBACK lowLevelKeyboardProc(int code, WPARAM wParam, LPARAM lParam) {
     const bool ctrlDown = isControlDown();
     const bool shiftDown = isShiftDown();
     const bool altDown = isAltDown() || wParam == WM_SYSKEYDOWN;
-    if ((key->vkCode == VK_RETURN || key->vkCode == VK_SPACE) &&
-        (ctrlDown || shiftDown || altDown)) {
+    if ((key->vkCode == VK_RETURN && (shiftDown || altDown)) ||
+        (key->vkCode == VK_SPACE && (ctrlDown || shiftDown || altDown))) {
         return CallNextHookEx(g_keyboardHook, code, wParam, lParam);
     }
     if (!isKeyboardHookCandidate(key->vkCode, altDown)) {
@@ -781,6 +811,9 @@ void MainWindow::setupUi() {
     m_gameInfoLabel->setStyleSheet("QLabel { font-size: 14px; padding: 10px; background-color: #f0f0f0; }");
     mainLayout->addWidget(m_gameInfoLabel);
 
+    m_cardTable = new CardTableWidget(central);
+    mainLayout->addWidget(m_cardTable, 1);
+
     m_bottomCardsLabel = new QLabel(central);
     m_bottomCardsLabel->setObjectName(QStringLiteral("bottomCardsLabel"));
     m_bottomCardsLabel->setWordWrap(true);
@@ -798,6 +831,10 @@ void MainWindow::setupUi() {
     m_handView->setMinimumHeight(120);
     m_handView->setSpacing(5);
     mainLayout->addWidget(m_handView);
+    connect(m_handModel.get(), &QAbstractItemModel::dataChanged, this,
+            [this]() { refreshVisualCardTable(); });
+    connect(m_handModel.get(), &QAbstractItemModel::modelReset, this,
+            [this]() { refreshVisualCardTable(); });
 
     m_countdownLabel = new QLabel(central);
     m_countdownLabel->setAccessibleName(QString::fromStdWString(L"本轮操作剩余时间"));
@@ -1005,6 +1042,7 @@ void MainWindow::refreshFromState(int preferredHandRow, bool restoreHandFocusSil
     updateTurnCountdown(isHumanTurn);
     updateBackgroundMusic();
     updateBiddingControls();
+    refreshVisualCardTable();
 }
 
 void MainWindow::showBiddingControls(bool announcePrompt) {
@@ -1273,7 +1311,7 @@ void MainWindow::onPass() {
 void MainWindow::onHint() {
     const auto hint = HintService::getHint(m_engine.state(), PlayerId::Player1);
     if (hint.empty()) {
-        announce(L"当前没有可以压过上一手的牌，可以按空格键过牌",
+        announce(L"当前没有可以压过上一手的牌，可以按Control加回车键过牌",
                  AnnouncementCategory::System);
         playSound(SoundId::Invalid);
         return;
@@ -1773,6 +1811,12 @@ bool MainWindow::handleNativeShortcut(
     if (virtualKey == VK_SPACE && noModifier &&
         phase == GamePhase::Playing &&
         m_engine.fullState().currentPlayer == PlayerId::Player1) {
+        return true;
+    }
+
+    if (virtualKey == VK_RETURN && ctrlDown && !shiftDown && !altDown &&
+        phase == GamePhase::Playing &&
+        m_engine.fullState().currentPlayer == PlayerId::Player1) {
         onPass();
         return true;
     }
@@ -2032,6 +2076,12 @@ bool MainWindow::handleKeyPress(QKeyEvent* event) {
         && navigationModifiers == Qt::NoModifier
         && phase == GamePhase::Playing
         && m_engine.fullState().currentPlayer == PlayerId::Player1) {
+        return true;
+    }
+    if ((event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter)
+        && navigationModifiers == Qt::ControlModifier
+        && phase == GamePhase::Playing
+        && m_engine.fullState().currentPlayer == PlayerId::Player1) {
         onPass();
         return true;
     }
@@ -2054,9 +2104,15 @@ void MainWindow::closeEvent(QCloseEvent* event) {
     const auto phase = m_engine.state().phase();
     if (phase == GamePhase::Bidding || phase == GamePhase::Playing ||
         phase == GamePhase::Paused) {
-        auto result = QMessageBox::question(this,
-            QString::fromStdWString(L"确认退出"),
-            QString::fromStdWString(L"牌局正在进行，确认要退出吗？"));
+        QMessageBox message(QMessageBox::Question,
+                            QString::fromStdWString(L"确认退出"),
+                            QString::fromStdWString(L"牌局正在进行，确认要退出吗？"),
+                            QMessageBox::Yes | QMessageBox::No, this);
+        message.button(QMessageBox::Yes)->setText(QString::fromStdWString(L"是"));
+        message.button(QMessageBox::No)->setText(QString::fromStdWString(L"否"));
+        message.setDefaultButton(QMessageBox::No);
+        message.setEscapeButton(QMessageBox::No);
+        const auto result = static_cast<QMessageBox::StandardButton>(message.exec());
         if (result != QMessageBox::Yes) {
             event->ignore();
             return;
@@ -2102,6 +2158,16 @@ std::wstring MainWindow::playerDisplayName(PlayerId playerId) const {
     return playerIdDisplayName(playerId);
 }
 
+std::wstring MainWindow::playedCardsPlayerDisplayName(PlayerId playerId) const {
+    const auto& players = m_engine.fullState().players;
+    const auto player = std::find_if(players.begin(), players.end(),
+        [playerId](const PlayerState& candidate) { return candidate.id == playerId; });
+    if (player != players.end() && player->role == Role::Landlord) {
+        return L"地主";
+    }
+    return playerDisplayName(playerId);
+}
+
 std::wstring MainWindow::formatEventForAnnouncement(const GameEvent& event) const {
     switch (event.type) {
     case GameEventType::BidRequested:
@@ -2116,7 +2182,7 @@ std::wstring MainWindow::formatEventForAnnouncement(const GameEvent& event) cons
     case GameEventType::TurnChanged:
         return L"轮到" + playerDisplayName(event.playerId);
     case GameEventType::CardsPlayed:
-        return playerDisplayName(event.playerId) + L"出了" +
+        return playedCardsPlayerDisplayName(event.playerId) + L"出了" +
                CardTextFormatter::formatPlayedCards(event.pattern, event.cards);
     case GameEventType::PlayerPassed:
         return playerDisplayName(event.playerId);
@@ -2133,7 +2199,7 @@ std::wstring MainWindow::formatEventForAnnouncement(const GameEvent& event) cons
 void MainWindow::presentPlayedCards(const GameEvent& event) {
     if (event.type != GameEventType::CardsPlayed || event.cards.empty()) return;
 
-    const std::wstring playerName = playerDisplayName(event.playerId);
+    const std::wstring playerName = playedCardsPlayerDisplayName(event.playerId);
     const std::wstring visibleText = playerName + L"，" +
         CardTextFormatter::formatPlayedCards(event.pattern, event.cards);
     if (m_statusLabel) {
@@ -2762,8 +2828,9 @@ void MainWindow::takeCurrentCard() {
         const int nextRow = m_handModel->nextUnselectedRow(row);
         if (nextRow >= 0) row = nextRow;
     }
+    bool selected = false;
     if (!m_handModel->isSelected(row)) {
-        m_handModel->selectSingle(row);
+        selected = m_handModel->selectSingle(row);
         playSound(SoundId::CardSelect);
     }
 
@@ -2776,6 +2843,11 @@ void MainWindow::takeCurrentCard() {
     }
     m_handView->scrollTo(targetIndex, QAbstractItemView::EnsureVisible);
     m_handView->viewport()->update();
+    if (selected) {
+        announce(CardTextFormatter::formatRankSpeech(card.rank()),
+                 AnnouncementCategory::CardSelection,
+                 AnnouncementPriority::Normal, false);
+    }
     QJsonObject details;
     details[QStringLiteral("card_id")] = static_cast<int>(card.id());
     details[QStringLiteral("target_row")] = row;
@@ -2823,6 +2895,9 @@ void MainWindow::takeCurrentGroup() {
         return;
     }
     playSound(SoundId::CardSelect);
+    announce(formatCardSelectionGroup(result.rank, result.groupCount),
+             AnnouncementCategory::CardSelection,
+             AnnouncementPriority::Normal, false);
     QJsonObject details;
     details[QStringLiteral("rank")] =
         QString::fromStdWString(CardTextFormatter::formatRankSpeech(result.rank));
@@ -2851,6 +2926,9 @@ void MainWindow::putDownNextPickedCard() {
     }
 
     playSound(SoundId::CardDeselect);
+    announce(CardTextFormatter::formatRankSpeech(card->rank()),
+             AnnouncementCategory::CardSelection,
+             AnnouncementPriority::Normal, false);
     QJsonObject details;
     details[QStringLiteral("success")] = true;
     details[QStringLiteral("card_id")] = static_cast<int>(card->id());
@@ -2862,11 +2940,14 @@ void MainWindow::putDownNextPickedCard() {
 void MainWindow::putDownAllCards() {
     const QJsonObject traceBefore = handTraceState();
     if (!m_handModel) return;
+    const auto selectedCards = m_handModel->selectedCards();
     const int selectedCount = m_handModel->selectedCount();
     suppressHandAccessibilityUntilUserAction();
     m_handModel->clearSelection();
     if (selectedCount > 0) {
         playSound(SoundId::CardDeselect);
+        announce(formatCardSelection(selectedCards), AnnouncementCategory::CardSelection,
+                 AnnouncementPriority::Normal, false);
     }
     QJsonObject details;
     details[QStringLiteral("released_count")] = selectedCount;
@@ -2875,6 +2956,13 @@ void MainWindow::putDownAllCards() {
 
 void MainWindow::syncPickedCardsToView() {
     // Sync is automatic through model
+}
+
+void MainWindow::refreshVisualCardTable() {
+    if (!m_cardTable || !m_handModel) return;
+    m_cardTable->setTableState(m_engine.publicSnapshot(),
+                               m_engine.fullState().players[0].hand.cards(),
+                               m_handModel->selectedCardIds());
 }
 
 void MainWindow::triggerBattleShortcut() {
@@ -2955,6 +3043,10 @@ void MainWindow::toggleBattleState() {
         announce(formatEventForAnnouncement(result.events.front()), AnnouncementCategory::System);
     }
     refreshFromState();
+    if (phase == GamePhase::Paused &&
+        m_engine.fullState().currentPlayer != PlayerId::Player1) {
+        scheduleAiTurn();
+    }
 }
 
 void MainWindow::announcePlayerAtPosition(int position) {
@@ -3070,7 +3162,7 @@ void MainWindow::announceLastAction() {
     const auto& state = m_engine.fullState();
     if (!state.lastPlayedCards.empty()) {
         const auto pattern = PatternAnalyzer::analyze(state.lastPlayedCards);
-        std::wstring text = playerDisplayName(state.lastPlayedBy) + L"，";
+        std::wstring text = playedCardsPlayerDisplayName(state.lastPlayedBy) + L"，";
         text += CardTextFormatter::formatPlayedCards(pattern, state.lastPlayedCards);
         announce(text, AnnouncementCategory::System);
     } else if (!m_lastPlayedCardsText.empty()) {
@@ -3083,7 +3175,7 @@ void MainWindow::announceLastAction() {
 void MainWindow::rememberLastAction(const CommandResult& result) {
     for (const auto& event : result.events) {
         if (event.type == GameEventType::CardsPlayed && !event.cards.empty()) {
-            m_lastPlayedCardsText = playerDisplayName(event.playerId) + L"，" +
+            m_lastPlayedCardsText = playedCardsPlayerDisplayName(event.playerId) + L"，" +
                 CardTextFormatter::formatPlayedCards(event.pattern, event.cards);
         }
     }

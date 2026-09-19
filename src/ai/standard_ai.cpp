@@ -3,6 +3,7 @@
 #include "bidding_strategy.h"
 #include "farmer_team_strategy.h"
 #include "landlord_strategy.h"
+#include "strategic_search_evaluator.h"
 #include "../core/rules/pattern_analyzer.h"
 
 #include <algorithm>
@@ -124,11 +125,11 @@ GameCommand StandardAiPlayer::decidePlay(const AiObservation& observation) {
     scoredMoves.reserve(candidateIndexes.size());
     const auto deadline = std::chrono::steady_clock::now() +
         std::chrono::milliseconds(m_profile.decisionBudgetMs);
+    StrategicSearchEvaluator strategicSearch(observation, m_profile);
 
     // Candidate limits constrain look-ahead work, never legality or the team
     // safety filter. Every safe first move receives the deterministic base score.
     const int lookAheadLimit = std::max(1, m_profile.candidateLimit);
-    int bestScore = std::numeric_limits<int>::min();
     for (const auto index : candidateIndexes) {
         const auto& move = moves[index];
         Hand remaining = observation.ownHand;
@@ -160,13 +161,45 @@ GameCommand StandardAiPlayer::decidePlay(const AiObservation& observation) {
             score += bombReserveCount(remaining) * kPolicy.bombReserveBonus;
         }
 
+        // The bounded planner compares complete future hand decompositions, so
+        // attachments, sequence preservation and control-card reserves are
+        // evaluated together instead of one move at a time. Public inference
+        // samples only cards consistent with AiObservation's public facts.
+        score += strategicSearch.handPlanAdjustment(remaining);
+        score += strategicSearch.publicInformationAdjustment(move, remaining, isLeader);
+
         score += publicRankPlayedCount(observation.publicState, move.pattern.mainRank) * 2;
         score += ownRole == Role::Farmer
             ? FarmerTeamStrategy::scoreAdjustment(observation, move, isLeader, lastRole)
             : LandlordStrategy::scoreAdjustment(observation, move, isLeader);
         scoredMoves.push_back({index, score});
-        bestScore = std::max(bestScore, score);
     }
+
+    // Beam-search only the strongest quick candidates. All legal/team-safe
+    // moves received the same deterministic shape and public-risk evaluation;
+    // the bounded deeper decomposition is reserved for this shortlist.
+    std::sort(scoredMoves.begin(), scoredMoves.end(),
+        [](const ScoredMove& left, const ScoredMove& right) {
+            if (left.score != right.score) return left.score > right.score;
+            return left.index < right.index;
+        });
+    const int planningLimit = std::min(static_cast<int>(scoredMoves.size()),
+                                       std::max(2, m_profile.searchDepth * 2));
+    for (int position = 0; position < planningLimit; ++position) {
+        const auto& move = moves[scoredMoves[position].index];
+        Hand remaining = observation.ownHand;
+        std::vector<CardId> cardIds;
+        cardIds.reserve(move.cards.size());
+        for (const auto& card : move.cards) cardIds.push_back(card.id());
+        remaining.removeCards(cardIds);
+        scoredMoves[position].score += strategicSearch.refinedHandPlanBonus(remaining);
+    }
+    scoredMoves.resize(planningLimit);
+    const int bestScore = std::max_element(
+        scoredMoves.begin(), scoredMoves.end(),
+        [](const ScoredMove& left, const ScoredMove& right) {
+            return left.score < right.score;
+        })->score;
 
     const int tolerance = std::max(4, std::abs(bestScore) / 100);
     std::vector<const ScoredMove*> safeNearBest;

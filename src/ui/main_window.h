@@ -31,6 +31,7 @@ class StatisticsRepository;
 class SoundService;
 class DiagnosticTraceService;
 class ResultDialog;
+class CardTableWidget;
 class MainWindow : public QMainWindow, public QAbstractNativeEventFilter {
     Q_OBJECT
 public:
@@ -110,6 +111,7 @@ private:
     void putDownNextPickedCard();
     void putDownAllCards();
     void syncPickedCardsToView();
+    void refreshVisualCardTable();
     void triggerBattleShortcut();
     bool triggerBottomCardsShortcut(const QString& source);
     void toggleBattleState();
@@ -124,6 +126,7 @@ private:
     QString buildDiagnosticReport() const;
     void applyPlayerDisplayNamesToState();
     std::wstring playerDisplayName(PlayerId playerId) const;
+    std::wstring playedCardsPlayerDisplayName(PlayerId playerId) const;
     std::wstring formatEventForAnnouncement(const GameEvent& event) const;
     void presentPlayedCards(const GameEvent& event);
     void handleSuccessfulPlayResult(const CommandResult& result, bool appendYourTurn);
@@ -151,6 +154,7 @@ private:
     std::unique_ptr<SoundService> m_sound;
     AppSettings m_settings;
     QListView* m_handView = nullptr;
+    CardTableWidget* m_cardTable = nullptr;
     QLabel* m_statusLabel = nullptr;
     QLabel* m_gameInfoLabel = nullptr;
     QLabel* m_bottomCardsLabel = nullptr;

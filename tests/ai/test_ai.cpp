@@ -6,6 +6,7 @@
 #include "ai/legal_move_generator.h"
 #include "ai/simple_ai.h"
 #include "ai/standard_ai.h"
+#include "ai/strategic_search_evaluator.h"
 #include "core/engine/game_engine.h"
 #include "core/rules/pattern_analyzer.h"
 #include "core/rules/pattern_comparator.h"
@@ -147,6 +148,73 @@ private slots:
         QVERIFY(beginner.searchDepth < intermediate.searchDepth);
         QVERIFY(intermediate.searchDepth < advanced.searchDepth);
         QVERIFY(beginner.candidateLimit < advanced.candidateLimit);
+        QCOMPARE(beginner.publicInferenceSamples, 0);
+        QVERIFY(intermediate.publicInferenceSamples > beginner.publicInferenceSamples);
+        QVERIFY(advanced.publicInferenceSamples > intermediate.publicInferenceSamples);
+    }
+
+    void testStrategicPlannerPrefersCompactHandDecomposition() {
+        Hand straightHand;
+        for (int rank = static_cast<int>(Rank::Three);
+             rank <= static_cast<int>(Rank::Seven); ++rank) {
+            straightHand.addCard(Card::create(static_cast<Rank>(rank), Suit::Spades, 0));
+        }
+        Hand fragmentedHand;
+        for (const Rank rank : {Rank::Three, Rank::Five, Rank::Seven,
+                                Rank::Nine, Rank::Jack}) {
+            fragmentedHand.addCard(Card::create(rank, Suit::Hearts, 0));
+        }
+
+        AiObservation observation;
+        observation.phase = GamePhase::Playing;
+        StrategicSearchEvaluator evaluator(observation,
+                                            aiLevelProfile(AiDifficulty::Advanced));
+        QVERIFY(evaluator.handPlanAdjustment(straightHand) >
+                evaluator.handPlanAdjustment(fragmentedHand));
+    }
+
+    void testPublicPassEvidenceChangesOnlyPublicRiskScore() {
+        AiObservation activeLandlord;
+        activeLandlord.playerId = PlayerId::Player2;
+        activeLandlord.phase = GamePhase::Playing;
+        activeLandlord.decisionSeed = 912345;
+        activeLandlord.ownHand.addCard(Card::create(Rank::Three, Suit::Spades, 0));
+        activeLandlord.ownHand.addCard(Card::create(Rank::Four, Suit::Spades, 0));
+        for (int index = 0; index < PLAYER_COUNT; ++index) {
+            auto& player = activeLandlord.publicState.players[index];
+            player.id = static_cast<PlayerId>(index);
+            player.remainingCards = index == static_cast<int>(PlayerId::Player2) ? 2 : 20;
+            player.role = Role::Farmer;
+            player.roleRevealed = true;
+        }
+        activeLandlord.publicState.players[
+            static_cast<int>(PlayerId::Player4)].role = Role::Landlord;
+
+        const auto move = LegalMoveGenerator::generateLegalMoves(
+            activeLandlord.ownHand).back();
+        Hand remaining = activeLandlord.ownHand;
+        std::vector<CardId> ids;
+        for (const auto& card : move.cards) ids.push_back(card.id());
+        QVERIFY(remaining.removeCards(ids));
+
+        StrategicSearchEvaluator activeEvaluator(
+            activeLandlord, aiLevelProfile(AiDifficulty::Advanced));
+        const int activeRisk = activeEvaluator.publicInformationAdjustment(
+            move, remaining, true);
+
+        AiObservation passedLandlord = activeLandlord;
+        passedLandlord.publicState.players[
+            static_cast<int>(PlayerId::Player4)].lastActionWasPass = true;
+        StrategicSearchEvaluator passedEvaluator(
+            passedLandlord, aiLevelProfile(AiDifficulty::Advanced));
+        const int passedRisk = passedEvaluator.publicInformationAdjustment(
+            move, remaining, true);
+        QVERIFY(passedRisk > activeRisk);
+
+        StrategicSearchEvaluator repeatedEvaluator(
+            activeLandlord, aiLevelProfile(AiDifficulty::Advanced));
+        QCOMPARE(repeatedEvaluator.publicInformationAdjustment(move, remaining, true),
+                 activeRisk);
     }
 
     void testBiddingIgnoresInjectedHiddenBottomCards() {

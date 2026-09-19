@@ -168,6 +168,17 @@ int FarmerTeamStrategy::scoreAdjustment(const AiObservation& observation,
                                         const LegalMove& move, bool isLeader,
                                         Role lastRole) {
     int adjustment = 0;
+    int landlordCards = 99;
+    if (const int landlord = landlordIndex(observation.publicState); landlord >= 0) {
+        landlordCards = observation.publicState.players[landlord].remainingCards;
+    }
+    if (!isLeader && lastRole == Role::Farmer && landlordCards <= 1) {
+        // The visible one-card threat is a hard team-rule exception. Use the
+        // lowest adequate interception even when private hand planning would
+        // prefer spending a higher card.
+        adjustment -= rankWeight(move.pattern.mainRank) * 1000;
+        if (move.pattern.isBomb()) adjustment -= 50000;
+    }
     if (!isLeader && lastRole == Role::Landlord) {
         // This dominates private hand-shape optimization: the farmer uses the
         // lowest adequate public response and retains control resources.
@@ -176,8 +187,7 @@ int FarmerTeamStrategy::scoreAdjustment(const AiObservation& observation,
         if (move.pattern.isBomb()) adjustment -= 50000;
     }
 
-    const int landlord = landlordIndex(observation.publicState);
-    if (landlord >= 0 && observation.publicState.players[landlord].remainingCards <= 2) {
+    if (landlordCards <= 2) {
         adjustment += static_cast<int>(move.cards.size()) * 250;
     }
     return adjustment;

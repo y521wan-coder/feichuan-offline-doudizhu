@@ -22,6 +22,8 @@
 #include <QTimer>
 #include <QAction>
 #include <QPushButton>
+#include <QMessageBox>
+#include <QAbstractButton>
 
 #ifdef Q_OS_WIN
 #ifndef WIN32_LEAN_AND_MEAN
@@ -37,6 +39,7 @@
 #include "ui/main_window.h"
 #include "ui/dialogs/settings_dialog.h"
 #include "ui/models/hand_list_model.h"
+#include "ui/widgets/card_table_widget.h"
 #include "ui/sound_service.h"
 #include "persistence/diagnostic_trace_service.h"
 #include "persistence/data_paths.h"
@@ -133,6 +136,18 @@ private slots:
         QTestAccessibility::clearEvents();
         QVERIFY(!accessibility.announce(announcement, statusLabel));
         QVERIFY(QTestAccessibility::events().isEmpty());
+
+        announcement.text = L"3";
+        announcement.category = AnnouncementCategory::CardSelection;
+        QVERIFY(accessibility.announce(announcement, statusLabel));
+        QVERIFY(accessibility.announce(announcement, statusLabel));
+        int repeatedSelectionFocusEvents = 0;
+        for (const QAccessibleEvent* event : QTestAccessibility::events()) {
+            if (event->type() == QAccessible::Focus && event->object() == statusLabel) {
+                ++repeatedSelectionFocusEvents;
+            }
+        }
+        QCOMPARE(repeatedSelectionFocusEvents, 2);
         QTestAccessibility::cleanup();
     }
 
@@ -426,49 +441,62 @@ private slots:
         QCOMPARE(handView->currentIndex().row(), 3);
         QTest::keyClick(&window, Qt::Key_Right);
         QCOMPARE(handView->currentIndex().row(), 6);
+        const QString browsedSevens = handModel->data(
+            handView->currentIndex(), Qt::AccessibleTextRole).toString();
+        QCOMPARE(browsedSevens, QString::fromUtf8(u8"4张7"));
 
         QTest::keyClick(&window, Qt::Key_Up, Qt::ControlModifier);
         QCOMPARE(handModel->selectedCount(), 4);
         for (int row = 6; row < 10; ++row) QVERIFY(handModel->isSelected(row));
+        auto* statusLabel = window.statusBar()->findChild<QLabel*>();
+        QVERIFY(statusLabel);
+        QCOMPARE(statusLabel->accessibleName(), browsedSevens);
 
         QTest::keyClick(&window, Qt::Key_Down, Qt::ControlModifier);
         QCOMPARE(handModel->selectedCount(), 0);
+        QCOMPARE(statusLabel->accessibleName(), browsedSevens);
 
         QTest::keyClick(&window, Qt::Key_Home);
-        auto* statusLabel = window.statusBar()->findChild<QLabel*>();
-        QVERIFY(statusLabel);
-        const QString statusBeforeSilentPick = statusLabel->text();
+        const QString statusBeforeSelectionSpeech = statusLabel->text();
         QTest::keyClick(&window, Qt::Key_Up, Qt::ControlModifier);
         QCOMPARE(handModel->selectedCount(), 3);
         QCOMPARE(handView->currentIndex().row(), 0);
+        QCOMPARE(statusLabel->accessibleName(), QString::fromUtf8(u8"3张3"));
         QTest::keyClick(&window, Qt::Key_Up, Qt::ControlModifier);
         QCOMPARE(handModel->selectedCount(), 6);
         QCOMPARE(handView->currentIndex().row(), 3);
+        QCOMPARE(statusLabel->accessibleName(), QString::fromUtf8(u8"3张4"));
 
         QTest::keyClick(&window, Qt::Key_Down, Qt::ControlModifier);
         QCOMPARE(handModel->selectedCount(), 0);
+        QCOMPARE(statusLabel->accessibleName(), QString::fromUtf8(u8"3张3、3张4"));
         QTest::keyClick(&window, Qt::Key_Up);
         QCOMPARE(handModel->selectedCount(), 1);
         QVERIFY(handModel->isSelected(3));
         QCOMPARE(handView->currentIndex().row(), 3);
-        QCOMPARE(statusLabel->text(), statusBeforeSilentPick);
+        QCOMPARE(statusLabel->text(), statusBeforeSelectionSpeech);
+        QCOMPARE(statusLabel->accessibleName(), QStringLiteral("4"));
         QTest::keyClick(&window, Qt::Key_Up);
         QCOMPARE(handModel->selectedCount(), 2);
         QVERIFY(handModel->isSelected(4));
         QCOMPARE(handView->currentIndex().row(), 4);
-        QCOMPARE(statusLabel->text(), statusBeforeSilentPick);
+        QCOMPARE(statusLabel->text(), statusBeforeSelectionSpeech);
+        QCOMPARE(statusLabel->accessibleName(), QStringLiteral("4"));
         QTest::keyClick(&window, Qt::Key_Up, Qt::ControlModifier);
         QCOMPARE(handModel->selectedCount(), 3);
         QCOMPARE(handView->currentIndex().row(), 3);
         QVERIFY(handModel->isSelected(5));
+        QCOMPARE(statusLabel->accessibleName(), QString::fromUtf8(u8"3张4"));
 
         QTest::keyClick(&window, Qt::Key_Down);
         QCOMPARE(handModel->selectedCount(), 2);
         QVERIFY(!handModel->isSelected(3));
         QVERIFY(handModel->isSelected(4));
         QVERIFY(handModel->isSelected(5));
+        QCOMPARE(statusLabel->accessibleName(), QStringLiteral("4"));
         QTest::keyClick(&window, Qt::Key_Down, Qt::ControlModifier);
         QCOMPARE(handModel->selectedCount(), 0);
+        QCOMPARE(statusLabel->accessibleName(), QString::fromUtf8(u8"对4"));
 
         QTest::keyClick(&window, Qt::Key_Home);
         QTest::keyClick(&window, Qt::Key_Right, Qt::ShiftModifier);
@@ -1187,6 +1215,20 @@ private slots:
         QTest::keyClick(&window, Qt::Key_F1);
         QCOMPARE(engine.state().phase(), GamePhase::Bidding);
 
+        engine.state().fullState().currentPlayer = PlayerId::Player2;
+        window.refreshFromState();
+
+        QTimer* aiTimer = nullptr;
+        const auto directTimers = window.findChildren<QTimer*>(
+            QString(), Qt::FindDirectChildrenOnly);
+        for (auto* timer : directTimers) {
+            if (timer->isSingleShot()) {
+                aiTimer = timer;
+                break;
+            }
+        }
+        QVERIFY(aiTimer);
+
         auto* handView = window.findChild<QListView*>();
         QVERIFY(handView);
         handView->setFocus(Qt::OtherFocusReason);
@@ -1195,11 +1237,13 @@ private slots:
         QTest::qWait(200);
         QTest::keyClick(handView, Qt::Key_F1);
         QCOMPARE(engine.state().phase(), GamePhase::Paused);
+        QVERIFY(!aiTimer->isActive());
         QCOMPARE(QApplication::focusWidget(), static_cast<QWidget*>(handView));
 
         QTest::qWait(200);
         QTest::keyClick(handView, Qt::Key_F1);
         QCOMPARE(engine.state().phase(), GamePhase::Bidding);
+        QVERIFY(aiTimer->isActive());
         QCOMPARE(QApplication::focusWidget(), static_cast<QWidget*>(handView));
 
         const auto previousGameId = engine.state().gameId();
@@ -1233,6 +1277,108 @@ private slots:
 
         QCOMPARE(handView->currentIndex().row(), 0);
         QCOMPARE(QApplication::focusWidget(), static_cast<QWidget*>(&window));
+    }
+
+    void testVisualCardTableUsesOnlyPublicAndHumanStateAndHasNoMouseInteraction() {
+        GameEngine engine;
+        auto& state = engine.state();
+        auto& fullState = state.fullState();
+        state.setPhase(GamePhase::Bidding);
+        fullState.currentPlayer = PlayerId::Player1;
+        fullState.players[0].hand.addCards({
+            Card::create(Rank::Three, Suit::Spades, 0),
+            Card::create(Rank::Three, Suit::Hearts, 0)
+        });
+        fullState.players[1].hand.addCard(Card::create(Rank::Seven, Suit::Spades, 0));
+        fullState.players[2].hand.addCard(Card::create(Rank::Eight, Suit::Hearts, 0));
+        fullState.players[3].hand.addCard(Card::create(Rank::Nine, Suit::Clubs, 0));
+        fullState.bottomCards = {
+            Card::create(Rank::Four, Suit::Spades, 0),
+            Card::create(Rank::Four, Suit::Hearts, 0),
+            Card::create(Rank::Five, Suit::Clubs, 0),
+            Card::create(Rank::Five, Suit::Diamonds, 0),
+            Card::create(Rank::Six, Suit::Spades, 0),
+            Card::create(Rank::Six, Suit::Hearts, 0),
+            Card::create(Rank::Jack, Suit::Clubs, 0),
+            Card::create(Rank::Queen, Suit::Diamonds, 0)
+        };
+        fullState.bottomCardsRevealed = false;
+
+        AccessibilityService accessibility;
+        MainWindow window(engine, accessibility);
+        window.resize(1000, 760);
+        window.show();
+        QVERIFY(QTest::qWaitForWindowActive(&window));
+        window.refreshFromState();
+
+        auto* table = window.findChild<CardTableWidget*>(QStringLiteral("visualCardTable"));
+        auto* handView = window.findChild<QListView*>();
+        auto* handModel = qobject_cast<HandListModel*>(handView ? handView->model() : nullptr);
+        QVERIFY(table);
+        QVERIFY(handModel);
+        QCOMPARE(table->focusPolicy(), Qt::NoFocus);
+        QVERIFY(table->testAttribute(Qt::WA_TransparentForMouseEvents));
+        QCOMPARE(table->displayedHumanCardCount(), 2);
+        QCOMPARE(table->displayedBottomCardCount(), 0);
+        QCOMPARE(table->displayedLastPlayedCardCount(), 0);
+        QCOMPARE(table->displayedOpponentBackCount(PlayerId::Player2), 1);
+        QCOMPARE(table->displayedOpponentBackCount(PlayerId::Player3), 1);
+        QCOMPARE(table->displayedOpponentBackCount(PlayerId::Player4), 1);
+
+        state.setPhase(GamePhase::Playing);
+        fullState.bottomCardsRevealed = true;
+        fullState.lastPlayedBy = PlayerId::Player2;
+        fullState.lastPlayedCards = {Card::create(Rank::Seven, Suit::Spades, 0)};
+        window.refreshFromState();
+        QCOMPARE(table->displayedBottomCardCount(), BOTTOM_CARDS);
+        QCOMPARE(table->displayedLastPlayedCardCount(), 1);
+
+        const int selectedBeforeMouse = handModel->selectedCount();
+        QTest::mouseClick(table, Qt::LeftButton, Qt::NoModifier, table->rect().center());
+        QCOMPARE(handModel->selectedCount(), selectedBeforeMouse);
+        QCOMPARE(table->displayedSelectedCardCount(), selectedBeforeMouse);
+
+        QTest::keyClick(&window, Qt::Key_Home);
+        QTest::keyClick(&window, Qt::Key_Up);
+        QCOMPARE(handModel->selectedCount(), 1);
+        QCOMPARE(table->displayedSelectedCardCount(), 1);
+        const QPixmap renderedTable = table->grab();
+        QVERIFY(!renderedTable.isNull());
+        QCOMPARE(renderedTable.size(), table->size());
+
+        state.setPhase(GamePhase::NotStarted);
+        window.close();
+    }
+
+    void testExitConfirmationUsesChineseButtonsAndDefaultsToNo() {
+        GameEngine engine;
+        engine.state().setPhase(GamePhase::Playing);
+        AccessibilityService accessibility;
+        MainWindow window(engine, accessibility);
+        window.show();
+        QVERIFY(QTest::qWaitForWindowActive(&window));
+
+        bool checkedDialog = false;
+        QTimer inspectDialog;
+        inspectDialog.setInterval(20);
+        connect(&inspectDialog, &QTimer::timeout, [&]() {
+            auto* message = qobject_cast<QMessageBox*>(QApplication::activeModalWidget());
+            if (!message) return;
+            QCOMPARE(message->button(QMessageBox::Yes)->text(), QString::fromUtf8(u8"是"));
+            QCOMPARE(message->button(QMessageBox::No)->text(), QString::fromUtf8(u8"否"));
+            QCOMPARE(message->defaultButton(), message->button(QMessageBox::No));
+            QCOMPARE(message->escapeButton(), message->button(QMessageBox::No));
+            checkedDialog = true;
+            QTest::keyClick(message, Qt::Key_Return);
+            inspectDialog.stop();
+        });
+        inspectDialog.start();
+        window.close();
+
+        QVERIFY(checkedDialog);
+        QVERIFY(window.isVisible());
+        engine.state().setPhase(GamePhase::NotStarted);
+        window.close();
     }
 
     void testPrimaryKeyboardShortcuts() {
@@ -1373,7 +1519,8 @@ private slots:
         QTest::keyClick(&window, Qt::Key_Up);
         QTest::keyClick(&window, Qt::Key_Return);
         QCOMPARE(fs.players[0].hand.size(), handSizeBeforePlay - 1);
-        QTRY_VERIFY(statusLabel->text().startsWith(QString::fromUtf8(u8"东风，")));
+        QTRY_VERIFY(statusLabel->text().startsWith(QString::fromUtf8(u8"地主，")));
+        QVERIFY(!statusLabel->text().contains(QString::fromUtf8(u8"东风")));
         const int expectedRowAfterPlay = rowBeforePlay < handModel->rowCount()
             ? rowBeforePlay
             : handModel->rowCount() - 1;
@@ -1383,7 +1530,8 @@ private slots:
         QVERIFY(remainingCardSpeech.isEmpty());
         QVERIFY(!statusLabel->text().contains(QString::fromUtf8(u8"\u51fa\u4e86")));
         QTest::keyClick(&window, Qt::Key_F12);
-        QVERIFY(statusLabel->text().startsWith(QString::fromUtf8(u8"东风，")));
+        QVERIFY(statusLabel->text().startsWith(QString::fromUtf8(u8"地主，")));
+        QVERIFY(!statusLabel->text().contains(QString::fromUtf8(u8"东风")));
         QVERIFY(statusLabel->text().contains(QString::fromUtf8(u8"张")));
         QVERIFY(!statusLabel->text().contains(QString::fromUtf8(u8"最后出牌的是")));
         QVERIFY(!containsForbiddenSpeech(statusLabel->text()));
@@ -1398,6 +1546,14 @@ private slots:
         QTest::keyClick(&window, Qt::Key_F12);
         QCOMPARE(statusLabel->text(), QString::fromUtf8(u8"北风，四个三，枪"));
 
+        fs.players[0].role = Role::Farmer;
+        fs.players[3].role = Role::Landlord;
+        QTest::keyClick(&window, Qt::Key_F12);
+        QCOMPARE(statusLabel->text(), QString::fromUtf8(u8"地主，四个三，枪"));
+        QVERIFY(!statusLabel->text().contains(QString::fromUtf8(u8"北风")));
+        fs.players[0].role = Role::Landlord;
+        fs.players[3].role = Role::Farmer;
+
         const int handSizeBeforePass = fs.players[0].hand.size();
         fs.currentPlayer = PlayerId::Player1;
         fs.lastPlayedBy = PlayerId::Player2;
@@ -1405,10 +1561,10 @@ private slots:
         fs.consecutivePasses = 0;
         window.refreshFromState();
 
-        QTest::keyClick(&window, Qt::Key_Return, Qt::ControlModifier);
+        QTest::keyClick(&window, Qt::Key_Space);
         QCOMPARE(fs.consecutivePasses, 0);
         QCOMPARE(fs.currentPlayer, PlayerId::Player1);
-        QTest::keyClick(&window, Qt::Key_Space);
+        QTest::keyClick(&window, Qt::Key_Return, Qt::ControlModifier);
         QCOMPARE(fs.players[0].hand.size(), handSizeBeforePass);
         QCOMPARE(fs.consecutivePasses, 1);
         QCOMPARE(fs.currentPlayer, PlayerId::Player2);
@@ -1470,7 +1626,7 @@ private slots:
 #endif
     }
 
-    void testFreeLeaderCanPassWithSpaceQtAndNativeKeyboardPaths() {
+    void testFreeLeaderCanPassWithControlEnterQtAndNativeKeyboardPaths() {
         GameEngine engine;
         AccessibilityService accessibility;
         MainWindow window(engine, accessibility);
@@ -1496,10 +1652,10 @@ private slots:
         QVERIFY(passButton);
         QVERIFY(passButton->isEnabled());
 
-        QTest::keyClick(&window, Qt::Key_Return, Qt::ControlModifier);
+        QTest::keyClick(&window, Qt::Key_Space);
         QCOMPARE(fullState.currentPlayer, PlayerId::Player1);
         QCOMPARE(fullState.consecutivePasses, 0);
-        QTest::keyClick(&window, Qt::Key_Space);
+        QTest::keyClick(&window, Qt::Key_Return, Qt::ControlModifier);
         QCOMPARE(fullState.currentPlayer, PlayerId::Player2);
         QVERIFY(fullState.lastPlayedCards.empty());
 
@@ -1513,11 +1669,11 @@ private slots:
         constexpr UINT keyboardHookMessage = WM_APP + 0x4F;
         constexpr LPARAM hookCtrlFlag = 0x01;
         QVERIFY(PostMessageW(reinterpret_cast<HWND>(window.winId()), keyboardHookMessage,
-                             VK_RETURN, hookCtrlFlag));
+                             VK_SPACE, 0));
         QTest::qWait(10);
         QCOMPARE(fullState.currentPlayer, PlayerId::Player1);
         QVERIFY(PostMessageW(reinterpret_cast<HWND>(window.winId()), keyboardHookMessage,
-                             VK_SPACE, 0));
+                             VK_RETURN, hookCtrlFlag));
         QTRY_COMPARE(fullState.currentPlayer, PlayerId::Player2);
 #endif
     }

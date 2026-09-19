@@ -56,7 +56,8 @@ bool AccessibilityService::announce(const Announcement& announcement, QObject* t
     if (!target || announcement.text.empty()) return false;
     auto scheduled = m_scheduler.schedule(announcement);
     if (!scheduled) return false;
-    if (m_lastAnnouncementTimer.isValid() && m_lastAnnouncementTimer.elapsed() < 150 &&
+    if (scheduled->category != AnnouncementCategory::CardSelection &&
+        m_lastAnnouncementTimer.isValid() && m_lastAnnouncementTimer.elapsed() < 150 &&
         scheduled->text == m_lastAnnouncementText &&
         scheduled->category == m_lastAnnouncementCategory) {
         return false;
