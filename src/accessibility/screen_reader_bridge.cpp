@@ -26,6 +26,7 @@ enum class Backend {
     Nvda,
     Baoyi,
     Zhengdu,
+    Narrator,
 };
 
 std::wstring backendDisplayName(Backend backend) {
@@ -36,6 +37,8 @@ std::wstring backendDisplayName(Backend backend) {
         return L"保益悦听";
     case Backend::Zhengdu:
         return L"争渡读屏";
+    case Backend::Narrator:
+        return L"Windows 讲述人（UIA 公告）";
     case Backend::None:
         return L"未检测到正在运行的官方读屏接口";
     }
@@ -67,6 +70,9 @@ Backend backendForProcess(const wchar_t* executableName) {
     if (_wcsicmp(executableName, L"ZDSRMain.exe") == 0 ||
         _wcsicmp(executableName, L"ZDSRMain_x64.exe") == 0) {
         return Backend::Zhengdu;
+    }
+    if (_wcsicmp(executableName, L"Narrator.exe") == 0) {
+        return Backend::Narrator;
     }
     return Backend::None;
 }
@@ -195,6 +201,10 @@ public:
 
     Impl() {
         m_disabled = qEnvironmentVariableIntValue("FPDZ_DISABLE_SCREEN_READER_APIS") != 0;
+        // This test-only override is honored only while private reader APIs are disabled,
+        // so production routing can never be forced through an environment variable.
+        m_forceNarratorForTests =
+            m_disabled && qEnvironmentVariableIntValue("FPDZ_TEST_NARRATOR_ACTIVE") != 0;
 #ifdef _WIN32
         if (!m_disabled) {
             loadNvda();
@@ -213,24 +223,36 @@ public:
 #endif
     }
 
-    bool speak(const std::wstring& text, bool interrupt) {
-        if (m_disabled || text.empty()) {
-            return false;
+    ScreenReaderDelivery speak(const std::wstring& text, bool interrupt) {
+        if ((m_disabled && !m_forceNarratorForTests) || text.empty()) {
+            return ScreenReaderDelivery::Unavailable;
         }
         const unsigned long long signature = currentReaderSessionSignature();
         m_readerSessionChanged = signature != m_readerSessionSignature;
         m_readerSessionSignature = signature;
+        bool narratorAvailable = false;
         for (Backend backend : routingOrder()) {
+            if (backend == Backend::Narrator) {
+                narratorAvailable = true;
+                continue;
+            }
             if (!isActive(backend)) {
                 continue;
             }
             if (speakThrough(backend, text, interrupt)) {
                 m_lastBackend = backend;
-                return true;
+                return ScreenReaderDelivery::PrivateApi;
             }
         }
+        // UI Automation notifications are broadcast to accessibility clients. Prefer
+        // a usable private reader API when another supported reader is also active,
+        // otherwise Narrator and that reader could both announce the same message.
+        if (narratorAvailable) {
+            m_lastBackend = Backend::Narrator;
+            return ScreenReaderDelivery::StandardAnnouncement;
+        }
         m_lastBackend = Backend::None;
-        return false;
+        return ScreenReaderDelivery::Unavailable;
     }
 
     void stop() {
@@ -256,12 +278,18 @@ public:
             }
 #endif
             break;
+        case Backend::Narrator:
+            // Narrator owns its UIA speech queue; there is no app-side stop API.
+            break;
         case Backend::None:
             break;
         }
     }
 
     std::wstring backendName() const {
+        if (m_lastBackend == Backend::Narrator) {
+            return backendDisplayName(m_lastBackend);
+        }
         if (m_disabled) {
             return L"官方读屏接口已由测试环境禁用";
         }
@@ -275,6 +303,10 @@ private:
 
     std::vector<Backend> routingOrder() const {
         std::vector<Backend> order = backendsByMostRecentStart();
+        if (m_forceNarratorForTests &&
+            std::find(order.begin(), order.end(), Backend::Narrator) == order.end()) {
+            order.insert(order.begin(), Backend::Narrator);
+        }
         constexpr std::array fallbackOrder{
             Backend::Nvda,
             Backend::Baoyi,
@@ -313,6 +345,10 @@ private:
             return false;
 #endif
         }
+        case Backend::Narrator:
+            // Narrator is only added to the route when its process is present (or
+            // through the disabled-APIs test override above).
+            return true;
         case Backend::None:
             return false;
         }
@@ -346,6 +382,8 @@ private:
 #else
             return false;
 #endif
+        case Backend::Narrator:
+            return false;
         case Backend::None:
             return false;
         }
@@ -436,6 +474,7 @@ private:
 #endif
 
     bool m_disabled = false;
+    bool m_forceNarratorForTests = false;
     bool m_readerSessionChanged = false;
     unsigned long long m_readerSessionSignature = 0;
     Backend m_lastBackend = Backend::None;
@@ -462,7 +501,7 @@ private:
 ScreenReaderBridge::ScreenReaderBridge() : m_impl(std::make_unique<Impl>()) {}
 ScreenReaderBridge::~ScreenReaderBridge() = default;
 
-bool ScreenReaderBridge::speak(const std::wstring& text, bool interrupt) {
+ScreenReaderDelivery ScreenReaderBridge::speak(const std::wstring& text, bool interrupt) {
     return m_impl->speak(text, interrupt);
 }
 
@@ -473,7 +512,7 @@ bool ScreenReaderBridge::readerSessionChanged() const {
 }
 
 std::wstring ScreenReaderBridge::routeName() const {
-    return L"当前读屏官方接口自动接管，Qt/UIA标准接口兜底";
+    return L"当前读屏官方接口自动接管，Windows讲述人使用UIA公告，Qt/UIA焦点事件兜底";
 }
 
 std::wstring ScreenReaderBridge::backendName() const { return m_impl->backendName(); }

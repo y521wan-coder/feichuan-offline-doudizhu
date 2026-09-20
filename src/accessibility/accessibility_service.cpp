@@ -69,8 +69,8 @@ bool AccessibilityService::announce(const Announcement& announcement, QObject* t
     // game speech uses the official API of whichever supported reader is active;
     // the traditional Qt/UIA event remains the no-reader/no-API fallback.
     widget->setAccessibleName(QString::fromStdWString(scheduled->text));
-    const bool submittedToReader = m_screenReaderBridge.speak(scheduled->text, true);
-    if (!submittedToReader) {
+    const ScreenReaderDelivery delivery = m_screenReaderBridge.speak(scheduled->text, true);
+    if (delivery != ScreenReaderDelivery::PrivateApi) {
         // A reader started after the game can inherit a stale Windows/Qt
         // accessibility session from the reader that just exited. Refresh the
         // standard backend once at that process-session boundary, then keep the
@@ -79,8 +79,18 @@ bool AccessibilityService::announce(const Announcement& announcement, QObject* t
             QAccessible::setActive(false);
             QAccessible::setActive(true);
         }
-        QAccessibleEvent event(widget, QAccessible::Focus);
-        QAccessible::updateAccessibility(&event);
+        if (delivery == ScreenReaderDelivery::StandardAnnouncement) {
+            QAccessibleAnnouncementEvent event(
+                widget, QString::fromStdWString(scheduled->text));
+            if (scheduled->priority == AnnouncementPriority::Critical ||
+                scheduled->priority == AnnouncementPriority::High) {
+                event.setPoliteness(QAccessible::AnnouncementPoliteness::Assertive);
+            }
+            QAccessible::updateAccessibility(&event);
+        } else {
+            QAccessibleEvent event(widget, QAccessible::Focus);
+            QAccessible::updateAccessibility(&event);
+        }
     }
     m_lastAnnouncementText = scheduled->text;
     m_lastAnnouncementCategory = scheduled->category;

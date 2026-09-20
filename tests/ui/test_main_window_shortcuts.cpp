@@ -247,6 +247,58 @@ private slots:
         QTestAccessibility::cleanup();
     }
 
+    void testNarratorUsesStandardAnnouncementWithoutMovingKeyboardFocus() {
+        qputenv("FPDZ_TEST_NARRATOR_ACTIVE", "1");
+        AccessibilityService accessibility;
+        qunsetenv("FPDZ_TEST_NARRATOR_ACTIVE");
+
+        GameEngine engine;
+        MainWindow window(engine, accessibility);
+        window.show();
+        QVERIFY(QTest::qWaitForWindowActive(&window));
+        window.setFocus();
+        QTRY_VERIFY(window.hasFocus());
+
+        auto* statusLabel = window.statusBar()->findChild<QLabel*>();
+        QVERIFY(statusLabel);
+        QWidget* focusBefore = QApplication::focusWidget();
+        QCOMPARE(focusBefore, &window);
+
+        QTestAccessibility::initialize();
+        QTestAccessibility::clearEvents();
+
+        Announcement announcement;
+        announcement.text = L"讲述人公告测试";
+        announcement.category = AnnouncementCategory::System;
+        announcement.priority = AnnouncementPriority::High;
+        QVERIFY(accessibility.announce(announcement, statusLabel));
+
+        int focusEventCount = 0;
+        int announcementEventCount = 0;
+        for (const QAccessibleEvent* event : QTestAccessibility::events()) {
+            if (event->type() == QAccessible::Focus && event->object() == statusLabel) {
+                ++focusEventCount;
+            }
+            if (event->type() != QAccessible::Announcement ||
+                event->object() != statusLabel) {
+                continue;
+            }
+            ++announcementEventCount;
+            const auto* narratorEvent =
+                static_cast<const QAccessibleAnnouncementEvent*>(event);
+            QCOMPARE(narratorEvent->message(), QString::fromUtf8(u8"讲述人公告测试"));
+            QCOMPARE(narratorEvent->politeness(),
+                     QAccessible::AnnouncementPoliteness::Assertive);
+        }
+        QCOMPARE(focusEventCount, 0);
+        QCOMPARE(announcementEventCount, 1);
+        QCOMPARE(statusLabel->accessibleName(), QString::fromUtf8(u8"讲述人公告测试"));
+        QCOMPARE(QApplication::focusWidget(), focusBefore);
+        QCOMPARE(QString::fromStdWString(accessibility.backendName()),
+                 QString::fromUtf8(u8"Windows 讲述人（UIA 公告）"));
+        QTestAccessibility::cleanup();
+    }
+
     void testLegacyRemoteAndAccessibilitySettingsAreIgnored() {
         QJsonObject legacy;
         legacy.insert(QStringLiteral("aiDifficulty"), 3);

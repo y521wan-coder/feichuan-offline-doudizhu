@@ -5,6 +5,12 @@
 
 namespace fpdz {
 
+enum class ScreenReaderDelivery {
+    Unavailable,
+    PrivateApi,
+    StandardAnnouncement,
+};
+
 class ScreenReaderBridge {
 public:
     ScreenReaderBridge();
@@ -13,7 +19,7 @@ public:
     ScreenReaderBridge(const ScreenReaderBridge&) = delete;
     ScreenReaderBridge& operator=(const ScreenReaderBridge&) = delete;
 
-    bool speak(const std::wstring& text, bool interrupt);
+    ScreenReaderDelivery speak(const std::wstring& text, bool interrupt);
     void stop();
     bool readerSessionChanged() const;
     std::wstring routeName() const;
