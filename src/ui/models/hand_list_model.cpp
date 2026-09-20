@@ -1,6 +1,9 @@
 ﻿#include "hand_list_model.h"
 #include "../../core/text/card_text_formatter.h"
+#include "../../core/rules/pattern_analyzer.h"
+#include <QSignalBlocker>
 #include <algorithm>
+#include <array>
 namespace fpdz {
 HandListModel::HandListModel(QObject* parent) : QAbstractListModel(parent) {}
 int HandListModel::rowCount(const QModelIndex&) const { return static_cast<int>(m_cards.size()); }
@@ -256,5 +259,129 @@ HandListModel::GroupSelectionResult HandListModel::selectGroup(int row) {
         }
     }
     return result;
+}
+
+std::optional<CardPattern> HandListModel::completeEndpointSelection(
+        int activePlayerCount, bool allowStraight) {
+    if (activePlayerCount != TWO_PLAYER_COUNT &&
+        activePlayerCount != THREE_PLAYER_COUNT &&
+        activePlayerCount != PLAYER_COUNT) {
+        return std::nullopt;
+    }
+    if (m_cards.size() != m_selected.size() ||
+        m_cards.size() != m_singleSelectionSpeech.size()) {
+        return std::nullopt;
+    }
+
+    // 1) 只在局部副本上读取当前选择，不改变模型。
+    const std::vector<Card> originalSelected = selectedCards();
+    std::array<int, RANK_COUNT> selectedPerRank{};
+    std::vector<CardId> selectedIds;
+    selectedIds.reserve(originalSelected.size());
+    for (const auto& card : originalSelected) {
+        if (!card.isValid()) return std::nullopt;
+        ++selectedPerRank[static_cast<size_t>(card.rank())];
+        selectedIds.push_back(card.id());
+    }
+    std::sort(selectedIds.begin(), selectedIds.end());
+    if (std::adjacent_find(selectedIds.begin(), selectedIds.end()) != selectedIds.end()) {
+        return std::nullopt;
+    }
+
+    std::vector<Rank> endpointRanks;
+    for (int rankIndex = 0; rankIndex < RANK_COUNT; ++rankIndex) {
+        if (selectedPerRank[static_cast<size_t>(rankIndex)] > 0) {
+            endpointRanks.push_back(static_cast<Rank>(rankIndex));
+        }
+    }
+    if (endpointRanks.size() != 2) return std::nullopt;
+
+    const Rank lowRank = endpointRanks[0];
+    const Rank highRank = endpointRanks[1];
+    int copiesPerRank = 0;
+    CardPatternType expectedType = CardPatternType::Invalid;
+    int minimumLength = 0;
+    if (allowStraight && originalSelected.size() == 2 &&
+        selectedPerRank[static_cast<size_t>(lowRank)] == 1 &&
+        selectedPerRank[static_cast<size_t>(highRank)] == 1) {
+        copiesPerRank = 1;
+        expectedType = CardPatternType::Straight;
+        minimumLength = 5;
+    } else if (originalSelected.size() == 4 &&
+               selectedPerRank[static_cast<size_t>(lowRank)] == 2 &&
+               selectedPerRank[static_cast<size_t>(highRank)] == 2) {
+        copiesPerRank = 2;
+        expectedType = CardPatternType::ConsecutivePairs;
+        minimumLength = 3;
+    } else {
+        return std::nullopt;
+    }
+
+    // 2) 两端只能在 3 到 A 之间，闭区间长度固定。
+    if (!canBeInSequence(lowRank) || !canBeInSequence(highRank)) return std::nullopt;
+    const int length = rankWeight(highRank) - rankWeight(lowRank) + 1;
+    if (length < minimumLength || length > 12) return std::nullopt;
+
+    // 3) 手牌实体必须全部有效且不重复。
+    std::vector<CardId> handIds;
+    handIds.reserve(m_cards.size());
+    for (const auto& card : m_cards) {
+        if (!card.isValid()) return std::nullopt;
+        handIds.push_back(card.id());
+    }
+    std::sort(handIds.begin(), handIds.end());
+    if (std::adjacent_find(handIds.begin(), handIds.end()) != handIds.end()) {
+        return std::nullopt;
+    }
+
+    // 4) 先在局部候选上补齐每个中间点数，全部成功后才提交。
+    std::vector<Card> candidateCards = originalSelected;
+    std::vector<int> addedRows;
+    std::vector<bool> taken(m_cards.size(), false);
+    for (int rankIndex = rankWeight(lowRank); rankIndex <= rankWeight(highRank); ++rankIndex) {
+        const Rank rank = static_cast<Rank>(rankIndex);
+        int need = copiesPerRank - selectedPerRank[static_cast<size_t>(rank)];
+        if (need < 0) return std::nullopt;
+        for (int row = 0; row < static_cast<int>(m_cards.size()) && need > 0; ++row) {
+            if (m_cards[row].rank() != rank || m_selected[row] || taken[row]) continue;
+            taken[row] = true;
+            candidateCards.push_back(m_cards[row]);
+            addedRows.push_back(row);
+            --need;
+        }
+        if (need > 0) return std::nullopt;
+    }
+
+    if (static_cast<int>(candidateCards.size()) != length * copiesPerRank) {
+        return std::nullopt;
+    }
+    std::vector<CardId> candidateIds;
+    candidateIds.reserve(candidateCards.size());
+    for (const auto& card : candidateCards) candidateIds.push_back(card.id());
+    std::sort(candidateIds.begin(), candidateIds.end());
+    if (std::adjacent_find(candidateIds.begin(), candidateIds.end()) != candidateIds.end()) {
+        return std::nullopt;
+    }
+
+    const CardPattern pattern = PatternAnalyzer::analyze(candidateCards, activePlayerCount);
+    if (!pattern.isValid() || pattern.type != expectedType ||
+        pattern.mainRank != lowRank || pattern.mainLength != length ||
+        pattern.totalCards != static_cast<int>(candidateCards.size())) {
+        return std::nullopt;
+    }
+
+    if (addedRows.empty()) return std::nullopt;
+    std::sort(addedRows.begin(), addedRows.end());
+    if (std::adjacent_find(addedRows.begin(), addedRows.end()) != addedRows.end()) {
+        return std::nullopt;
+    }
+
+    // 5) 全部校验通过后才借用原有 setSelected 提交，保留原端点实体与拿牌顺序。
+    {
+        const QSignalBlocker blocker(this);
+        for (int row : addedRows) setSelected(row, true);
+    }
+    emit dataChanged(index(addedRows.front(), 0), index(addedRows.back(), 0), {SelectedRole});
+    return pattern;
 }
 } // namespace fpdz

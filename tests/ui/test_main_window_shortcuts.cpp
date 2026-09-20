@@ -24,6 +24,8 @@
 #include <QPushButton>
 #include <QMessageBox>
 #include <QAbstractButton>
+#include <QRegularExpression>
+#include <QStringList>
 
 #ifdef Q_OS_WIN
 #ifndef WIN32_LEAN_AND_MEAN
@@ -32,7 +34,12 @@
 #include <windows.h>
 #endif
 
+#include <algorithm>
+#include <optional>
+#include <vector>
+
 #include "accessibility/accessibility_service.h"
+#include "core/audio/card_pattern_sound_plan.h"
 #include "core/engine/game_engine.h"
 #include "core/model/card.h"
 #include "core/rules/pattern_analyzer.h"
@@ -554,11 +561,17 @@ private slots:
         QTest::keyClick(&window, Qt::Key_Up, Qt::ControlModifier);
         QCOMPARE(handModel->selectedCount(), 6);
         QCOMPARE(handView->currentIndex().row(), 3);
-        QCOMPARE(statusLabel->accessibleName(), QString::fromUtf8(u8"3张4"));
+        // 本轮首尾选牌规格变更点：333 加 444 恰好构成不带翅膀的飞机，
+        // 因此整组拿牌与 Ctrl+下全部放下都改用首尾范围报牌。
+        // 该用例的输入正是新规格覆盖的两端点手势，旧文案“3张4 / 3张3、3张4”
+        // 按 docs\测试与验收.md 记录的理由改为“3到4飞机”；
+        // 不构成牌型的混合选择仍保留旧组文案，另由
+        // testControlDownKeepsGroupTextForMixedSelection 覆盖。
+        QCOMPARE(statusLabel->accessibleName(), QString::fromUtf8(u8"3到4飞机"));
 
         QTest::keyClick(&window, Qt::Key_Down, Qt::ControlModifier);
         QCOMPARE(handModel->selectedCount(), 0);
-        QCOMPARE(statusLabel->accessibleName(), QString::fromUtf8(u8"3张3、3张4"));
+        QCOMPARE(statusLabel->accessibleName(), QString::fromUtf8(u8"3到4飞机"));
         QTest::keyClick(&window, Qt::Key_Up);
         QCOMPARE(handModel->selectedCount(), 1);
         QVERIFY(handModel->isSelected(3));
@@ -2136,8 +2149,1693 @@ private slots:
 #endif
     }
 
+    // ===== 首尾选牌辅助：模型层确定性用例（S/P/I 系列）=====
+
+    void testEndpointCompletionStraightForwardAndReverse() {
+        // S01 先 3 后 7；S02 反向 7 后 3；S19 同一输入结果完全一致
+        const auto cards = sequenceOfHand(Rank::Three, 5, 1);
+        HandListModel forward;
+        QVERIFY(forward.setCards(cards));
+        QCOMPARE(forward.rowCount(), 5);
+        QVERIFY(forward.selectSingle(0));
+        QVERIFY(forward.selectSingle(4));
+        const auto pattern = forward.completeEndpointSelection(PLAYER_COUNT, true);
+        QVERIFY(pattern.has_value());
+        QCOMPARE(pattern->type, CardPatternType::Straight);
+        QCOMPARE(pattern->mainRank, Rank::Three);
+        QCOMPARE(pattern->mainLength, 5);
+        QCOMPARE(pattern->totalCards, 5);
+        QCOMPARE(forward.selectedCount(), 5);
+        const auto expectedIds = forward.selectedCardIds();
+
+        HandListModel reverse;
+        QVERIFY(reverse.setCards(cards));
+        QVERIFY(reverse.selectSingle(4));
+        QVERIFY(reverse.selectSingle(0));
+        const auto reversePattern = reverse.completeEndpointSelection(PLAYER_COUNT, true);
+        QVERIFY(reversePattern.has_value());
+        QVERIFY(reverse.selectedCardIds() == expectedIds);
+
+        HandListModel repeat;
+        QVERIFY(repeat.setCards(cards));
+        QVERIFY(repeat.selectSingle(0));
+        QVERIFY(repeat.selectSingle(4));
+        QVERIFY(repeat.completeEndpointSelection(PLAYER_COUNT, true).has_value());
+        QVERIFY(repeat.selectedCardIds() == expectedIds);
+    }
+
+    void testEndpointCompletionStraightKeepsRequestedRange() {
+        // S03 手牌 3456789，端点 3/7 只补到 7
+        const auto cards = sequenceOfHand(Rank::Three, 7, 1);
+        HandListModel model;
+        QVERIFY(model.setCards(cards));
+        QVERIFY(model.selectSingle(0));
+        QVERIFY(model.selectSingle(4));
+        const auto pattern = model.completeEndpointSelection(PLAYER_COUNT, true);
+        QVERIFY(pattern.has_value());
+        QCOMPARE(model.selectedCount(), 5);
+        for (const int row : {0, 1, 2, 3, 4}) QVERIFY(model.isSelected(row));
+        QVERIFY(!model.isSelected(5));
+        QVERIFY(!model.isSelected(6));
+    }
+
+    void testEndpointCompletionStraightRequiresMinimumLength() {
+        // S04 手牌 3456，端点 3/6 长度不足
+        const auto cards = sequenceOfHand(Rank::Three, 4, 1);
+        HandListModel model;
+        QVERIFY(model.setCards(cards));
+        QVERIFY(model.selectSingle(0));
+        QVERIFY(model.selectSingle(3));
+        QVERIFY(!model.completeEndpointSelection(PLAYER_COUNT, true).has_value());
+        QCOMPARE(model.selectedCount(), 2);
+        QVERIFY(!model.isSelected(1));
+        QVERIFY(!model.isSelected(2));
+    }
+
+    void testEndpointCompletionFailsWithoutChangingSelectionOrOrder() {
+        // S05 缺 6 不补；I05 失败时不发选择变化信号，拿牌队列保持原样
+        const auto cards = handOfCounts({{Rank::Three, 1}, {Rank::Four, 1},
+                                         {Rank::Five, 1}, {Rank::Seven, 1}});
+        HandListModel model;
+        QVERIFY(model.setCards(cards));
+        QCOMPARE(model.rowCount(), 4);
+        QVERIFY(model.selectSingle(0));
+        QVERIFY(model.selectSingle(3));
+        int changes = 0;
+        QObject::connect(&model, &QAbstractItemModel::dataChanged,
+            [&changes](const QModelIndex&, const QModelIndex&, const QVector<int>&) {
+                ++changes;
+            });
+        QVERIFY(!model.completeEndpointSelection(PLAYER_COUNT, true).has_value());
+        QCOMPARE(changes, 0);
+        QCOMPARE(model.selectedCount(), 2);
+        const auto first = model.deselectNextPickedCard();
+        QVERIFY(first.has_value());
+        QCOMPARE(first->rank(), Rank::Three);
+        const auto second = model.deselectNextPickedCard();
+        QVERIFY(second.has_value());
+        QCOMPARE(second->rank(), Rank::Seven);
+        QCOMPARE(model.selectedCount(), 0);
+    }
+
+    void testEndpointCompletionTakesOneCardPerMiddleRank() {
+        // S06 同点多张时每个中间点数只取一张
+        const auto cards = handOfCounts({{Rank::Three, 3}, {Rank::Four, 2}, {Rank::Five, 1},
+                                         {Rank::Six, 4}, {Rank::Seven, 2}});
+        HandListModel model;
+        QVERIFY(model.setCards(cards));
+        QCOMPARE(model.rowCount(), 12);
+        QVERIFY(model.selectSingle(0));
+        QVERIFY(model.selectSingle(10));
+        const auto pattern = model.completeEndpointSelection(PLAYER_COUNT, true);
+        QVERIFY(pattern.has_value());
+        QCOMPARE(model.selectedCount(), 5);
+        QCOMPARE(model.unselectedCountOfRank(Rank::Three), 2);
+        QCOMPARE(model.unselectedCountOfRank(Rank::Four), 1);
+        QCOMPARE(model.unselectedCountOfRank(Rank::Five), 0);
+        QCOMPARE(model.unselectedCountOfRank(Rank::Six), 3);
+        QCOMPARE(model.unselectedCountOfRank(Rank::Seven), 1);
+    }
+
+    void testEndpointCompletionKeepsChosenEndpointEntities() {
+        // S07 端点使用具体实体，补牌不替换成同点排序更靠前的牌
+        const auto cards = handOfCounts({{Rank::Three, 3}, {Rank::Four, 2}, {Rank::Five, 1},
+                                         {Rank::Six, 1}, {Rank::Seven, 2}});
+        HandListModel model;
+        QVERIFY(model.setCards(cards));
+        QCOMPARE(model.cardAt(2).rank(), Rank::Three);
+        QCOMPARE(model.cardAt(8).rank(), Rank::Seven);
+        QVERIFY(model.selectSingle(2));
+        QVERIFY(model.selectSingle(8));
+        QVERIFY(model.completeEndpointSelection(PLAYER_COUNT, true).has_value());
+        QCOMPARE(model.selectedCount(), 5);
+        QVERIFY(model.isSelected(2));
+        QVERIFY(!model.isSelected(0));
+        QVERIFY(!model.isSelected(1));
+        QVERIFY(model.isSelected(3));
+        QVERIFY(model.isSelected(5));
+        QVERIFY(model.isSelected(6));
+    }
+
+    void testEndpointCompletionCoversFullThreeToAceRange() {
+        // S08 3 到 A 完整十二点、10/J/Q/K/A 五点，A 不能作为低位接 2
+        const auto full = sequenceOfHand(Rank::Three, 12, 1);
+        HandListModel model;
+        QVERIFY(model.setCards(full));
+        QCOMPARE(model.rowCount(), 12);
+        QVERIFY(model.selectSingle(0));
+        QVERIFY(model.selectSingle(11));
+        const auto pattern = model.completeEndpointSelection(PLAYER_COUNT, true);
+        QVERIFY(pattern.has_value());
+        QCOMPARE(pattern->type, CardPatternType::Straight);
+        QCOMPARE(pattern->mainRank, Rank::Three);
+        QCOMPARE(pattern->mainLength, 12);
+        QCOMPARE(model.selectedCount(), 12);
+
+        const auto high = sequenceOfHand(Rank::Ten, 5, 1);
+        HandListModel highModel;
+        QVERIFY(highModel.setCards(high));
+        QVERIFY(highModel.selectSingle(0));
+        QVERIFY(highModel.selectSingle(4));
+        const auto highPattern = highModel.completeEndpointSelection(PLAYER_COUNT, true);
+        QVERIFY(highPattern.has_value());
+        QCOMPARE(highPattern->mainRank, Rank::Ten);
+        QCOMPARE(highPattern->mainLength, 5);
+        QCOMPARE(highModel.selectedCount(), 5);
+
+        const auto aceTwo = handOfCounts({{Rank::Ace, 1}, {Rank::Two, 1}});
+        HandListModel rejected;
+        QVERIFY(rejected.setCards(aceTwo));
+        QVERIFY(rejected.selectSingle(0));
+        QVERIFY(rejected.selectSingle(1));
+        QVERIFY(!rejected.completeEndpointSelection(PLAYER_COUNT, true).has_value());
+        QCOMPARE(rejected.selectedCount(), 2);
+    }
+
+    void testEndpointCompletionRejectsTwoAndJokers() {
+        // S09 端点含 2 或王时不补
+        std::vector<Card> cards = sequenceOfHand(Rank::Three, 12, 1);
+        const auto two = handOfCounts({{Rank::Two, 1}});
+        cards.insert(cards.end(), two.begin(), two.end());
+        const auto smallJoker = handOfCounts({{Rank::SmallJoker, 1}});
+        cards.insert(cards.end(), smallJoker.begin(), smallJoker.end());
+        const auto bigJoker = handOfCounts({{Rank::BigJoker, 1}});
+        cards.insert(cards.end(), bigJoker.begin(), bigJoker.end());
+        HandListModel model;
+        QVERIFY(model.setCards(cards));
+        QCOMPARE(model.rowCount(), 15);
+        int aceRow = -1;
+        int twoRow = -1;
+        int bigRow = -1;
+        for (int row = 0; row < model.rowCount(); ++row) {
+            const auto rank = model.cardAt(row).rank();
+            if (rank == Rank::Ace) aceRow = row;
+            if (rank == Rank::Two) twoRow = row;
+            if (rank == Rank::BigJoker) bigRow = row;
+        }
+        QVERIFY(aceRow > 0);
+        QVERIFY(twoRow > aceRow);
+        QVERIFY(bigRow > twoRow);
+
+        QVERIFY(model.selectSingle(aceRow));
+        QVERIFY(model.selectSingle(twoRow));
+        QVERIFY(!model.completeEndpointSelection(PLAYER_COUNT, true).has_value());
+        QCOMPARE(model.selectedCount(), 2);
+
+        model.clearSelection();
+        QVERIFY(model.selectSingle(0));
+        QVERIFY(model.selectSingle(bigRow));
+        QVERIFY(!model.completeEndpointSelection(PLAYER_COUNT, true).has_value());
+        QCOMPARE(model.selectedCount(), 2);
+
+        model.clearSelection();
+        QVERIFY(model.selectSingle(twoRow));
+        QVERIFY(model.selectSingle(bigRow));
+        QVERIFY(!model.completeEndpointSelection(PLAYER_COUNT, true).has_value());
+        QCOMPARE(model.selectedCount(), 2);
+    }
+
+    void testEndpointCompletionKeepsUnrelatedSelection() {
+        // S10 存在第三种点数选择时不补、也不丢旧选择
+        std::vector<Card> cards = sequenceOfHand(Rank::Three, 5, 1);
+        const auto nine = handOfCounts({{Rank::Nine, 1}});
+        cards.insert(cards.end(), nine.begin(), nine.end());
+        HandListModel model;
+        QVERIFY(model.setCards(cards));
+        QCOMPARE(model.rowCount(), 6);
+        const int nineRow = model.lastBrowsableGroupStartRow();
+        QVERIFY(nineRow >= 0);
+        QCOMPARE(model.cardAt(nineRow).rank(), Rank::Nine);
+        QVERIFY(model.selectSingle(nineRow));
+        QVERIFY(model.selectSingle(0));
+        QVERIFY(model.selectSingle(4));
+        QVERIFY(!model.completeEndpointSelection(PLAYER_COUNT, true).has_value());
+        QCOMPARE(model.selectedCount(), 3);
+        QVERIFY(model.isSelected(nineRow));
+        QVERIFY(model.isSelected(0));
+        QVERIFY(model.isSelected(4));
+    }
+
+    void testEndpointCompletionKeepsSameRankPairUnchanged() {
+        // S11 两个同点单牌保持对子
+        const auto cards = handOfCounts({{Rank::Five, 2}, {Rank::Eight, 1}, {Rank::Nine, 1}});
+        HandListModel model;
+        QVERIFY(model.setCards(cards));
+        QVERIFY(model.selectSingle(0));
+        QVERIFY(model.selectSingle(1));
+        QVERIFY(!model.completeEndpointSelection(PLAYER_COUNT, true).has_value());
+        QCOMPARE(model.selectedCount(), 2);
+        QVERIFY(model.isSelected(0));
+        QVERIFY(model.isSelected(1));
+    }
+
+    void testEndpointCompletionHonoursAllowStraightFlag() {
+        // S12 单张入口关闭时不补顺子；P14 各两张首尾仍可补连对（整组入口同样成立）
+        const auto singles = sequenceOfHand(Rank::Three, 5, 1);
+        HandListModel singleModel;
+        QVERIFY(singleModel.setCards(singles));
+        QVERIFY(singleModel.selectSingle(0));
+        QVERIFY(singleModel.selectSingle(4));
+        QVERIFY(!singleModel.completeEndpointSelection(PLAYER_COUNT, false).has_value());
+        QCOMPARE(singleModel.selectedCount(), 2);
+
+        const auto pairs = sequenceOfHand(Rank::Four, 3, 2);
+        HandListModel pairModel;
+        QVERIFY(pairModel.setCards(pairs));
+        QCOMPARE(pairModel.rowCount(), 6);
+        QVERIFY(pairModel.selectSingle(0));
+        QVERIFY(pairModel.selectSingle(1));
+        QVERIFY(pairModel.selectSingle(4));
+        QVERIFY(pairModel.selectSingle(5));
+        const auto pattern = pairModel.completeEndpointSelection(PLAYER_COUNT, false);
+        QVERIFY(pattern.has_value());
+        QCOMPARE(pattern->type, CardPatternType::ConsecutivePairs);
+        QCOMPARE(pairModel.selectedCount(), 6);
+
+        HandListModel groupModel;
+        QVERIFY(groupModel.setCards(pairs));
+        QCOMPARE(groupModel.selectGroup(0).newlySelectedCount, 2);
+        const int sixRow = groupModel.nextGroupStartRow(groupModel.nextGroupStartRow(0));
+        QCOMPARE(groupModel.cardAt(sixRow).rank(), Rank::Six);
+        QCOMPARE(groupModel.selectGroup(sixRow).newlySelectedCount, 2);
+        QCOMPARE(groupModel.selectedCount(), 4);
+        const auto groupPattern = groupModel.completeEndpointSelection(PLAYER_COUNT, false);
+        QVERIFY(groupPattern.has_value());
+        QCOMPARE(groupModel.selectedCount(), 6);
+    }
+
+    void testEndpointCompletionRejectsUnsupportedPlayerCounts() {
+        // S13 人数 0/1/5 不改变任何状态
+        const auto cards = sequenceOfHand(Rank::Three, 5, 1);
+        HandListModel model;
+        QVERIFY(model.setCards(cards));
+        QVERIFY(model.selectSingle(0));
+        QVERIFY(model.selectSingle(4));
+        for (const int playerCount : {0, 1, 5}) {
+            QVERIFY(!model.completeEndpointSelection(playerCount, true).has_value());
+            QVERIFY(!model.completeEndpointSelection(playerCount, false).has_value());
+        }
+        QCOMPARE(model.selectedCount(), 2);
+        QCOMPARE(model.unselectedCountOfRank(Rank::Four), 1);
+    }
+
+    void testEndpointCompletionReturnsEmptyForEmptyOrSingleSelection() {
+        // S14 空手牌、空选择、仅一张选择
+        HandListModel empty;
+        QVERIFY(!empty.completeEndpointSelection(PLAYER_COUNT, true).has_value());
+        QCOMPARE(empty.rowCount(), 0);
+
+        const auto cards = sequenceOfHand(Rank::Three, 5, 1);
+        HandListModel model;
+        QVERIFY(model.setCards(cards));
+        int changes = 0;
+        QObject::connect(&model, &QAbstractItemModel::dataChanged,
+            [&changes](const QModelIndex&, const QModelIndex&, const QVector<int>&) {
+                ++changes;
+            });
+        QVERIFY(!model.completeEndpointSelection(PLAYER_COUNT, true).has_value());
+        QVERIFY(model.selectSingle(0));
+        QCOMPARE(model.selectedCount(), 1);
+        QCOMPARE(changes, 1);
+        QVERIFY(!model.completeEndpointSelection(PLAYER_COUNT, true).has_value());
+        QCOMPARE(changes, 1);
+        QCOMPARE(model.selectedCount(), 1);
+    }
+
+    void testEndpointCompletionKeepsUniqueIdsInDoubleDeck() {
+        // S15 四人两副牌同点同花色不同副牌编号是不同实体
+        std::vector<Card> cards;
+        for (int offset = 0; offset < 5; ++offset) {
+            const auto rank = static_cast<Rank>(static_cast<int>(Rank::Three) + offset);
+            cards.push_back(Card::create(rank, Suit::Spades, 0));
+            cards.push_back(Card::create(rank, Suit::Spades, 1));
+        }
+        HandListModel model;
+        QVERIFY(model.setCards(cards));
+        QCOMPARE(model.rowCount(), 10);
+        QVERIFY(model.selectSingle(0));
+        QVERIFY(model.selectSingle(9));
+        const auto pattern = model.completeEndpointSelection(PLAYER_COUNT, true);
+        QVERIFY(pattern.has_value());
+        QCOMPARE(model.selectedCount(), 5);
+        auto ids = model.selectedCardIds();
+        std::sort(ids.begin(), ids.end());
+        QCOMPARE(static_cast<int>(std::unique(ids.begin(), ids.end()) - ids.begin()), 5);
+        QVERIFY(model.isSelected(0));
+        QVERIFY(model.isSelected(9));
+        QVERIFY(!model.isSelected(1));
+        QVERIFY(!model.isSelected(8));
+    }
+
+    void testEndpointCompletionIsIdempotent() {
+        // S16 成功后重复调用不再补牌
+        const auto cards = sequenceOfHand(Rank::Three, 5, 1);
+        HandListModel model;
+        QVERIFY(model.setCards(cards));
+        QVERIFY(model.selectSingle(0));
+        QVERIFY(model.selectSingle(4));
+        QVERIFY(model.completeEndpointSelection(PLAYER_COUNT, true).has_value());
+        const auto ids = model.selectedCardIds();
+        QVERIFY(!model.completeEndpointSelection(PLAYER_COUNT, true).has_value());
+        QVERIFY(!model.completeEndpointSelection(PLAYER_COUNT, false).has_value());
+        QCOMPARE(model.selectedCount(), 5);
+        QVERIFY(model.selectedCardIds() == ids);
+    }
+
+    void testReleasingMiddleCardAfterCompletionIsNotRefilled() {
+        // S17 放下一张后不补回；同一牌组保持原选择
+        const auto cards = sequenceOfHand(Rank::Three, 5, 1);
+        HandListModel model;
+        QVERIFY(model.setCards(cards));
+        QVERIFY(model.selectSingle(0));
+        QVERIFY(model.selectSingle(4));
+        QVERIFY(model.completeEndpointSelection(PLAYER_COUNT, true).has_value());
+        const int fiveRow = model.groupStartRow(2);
+        QCOMPARE(model.cardAt(fiveRow).rank(), Rank::Five);
+        QVERIFY(model.isSelected(fiveRow));
+        model.setSelected(fiveRow, false);
+        QCOMPARE(model.selectedCount(), 4);
+        QVERIFY(!model.setCards(cards));
+        QCOMPARE(model.selectedCount(), 4);
+        QVERIFY(!model.isSelected(fiveRow));
+    }
+
+    void testCompletedStraightIsNotExtendedByNextCard() {
+        // S18 已组成 3—7 后再拿 9 不补 8
+        const auto cards = sequenceOfHand(Rank::Three, 7, 1);
+        HandListModel model;
+        QVERIFY(model.setCards(cards));
+        QVERIFY(model.selectSingle(0));
+        QVERIFY(model.selectSingle(4));
+        QVERIFY(model.completeEndpointSelection(PLAYER_COUNT, true).has_value());
+        QCOMPARE(model.selectedCount(), 5);
+        const int nineRow = model.groupStartRow(6);
+        QCOMPARE(model.cardAt(nineRow).rank(), Rank::Nine);
+        QVERIFY(model.selectSingle(nineRow));
+        QCOMPARE(model.selectedCount(), 6);
+        QVERIFY(!model.completeEndpointSelection(PLAYER_COUNT, true).has_value());
+        QVERIFY(!model.isSelected(5));
+    }
+
+    void testSelectSingleKeepsOriginalSemantics() {
+        // S20 不调用辅助方法时，连续两次单张拿牌仍然只拿两张
+        const auto cards = sequenceOfHand(Rank::Three, 5, 1);
+        HandListModel model;
+        QVERIFY(model.setCards(cards));
+        QVERIFY(model.selectSingle(0));
+        QVERIFY(model.selectSingle(4));
+        QCOMPARE(model.selectedCount(), 2);
+        QVERIFY(!PatternAnalyzer::analyze(model.selectedCards(), PLAYER_COUNT).isValid());
+    }
+
+    void testEndpointCompletionBuildsConsecutivePairsBothDirections() {
+        // P01 先 44 再 66；P02 反向顺序结果一致
+        const auto cards = sequenceOfHand(Rank::Four, 3, 2);
+        HandListModel forward;
+        QVERIFY(forward.setCards(cards));
+        QCOMPARE(forward.rowCount(), 6);
+        QVERIFY(forward.selectSingle(0));
+        QVERIFY(forward.selectSingle(1));
+        QVERIFY(forward.selectSingle(4));
+        QVERIFY(forward.selectSingle(5));
+        const auto pattern = forward.completeEndpointSelection(PLAYER_COUNT, false);
+        QVERIFY(pattern.has_value());
+        QCOMPARE(pattern->type, CardPatternType::ConsecutivePairs);
+        QCOMPARE(pattern->mainRank, Rank::Four);
+        QCOMPARE(pattern->mainLength, 3);
+        QCOMPARE(pattern->totalCards, 6);
+        QCOMPARE(forward.selectedCount(), 6);
+        const auto ids = forward.selectedCardIds();
+
+        HandListModel reverse;
+        QVERIFY(reverse.setCards(cards));
+        QVERIFY(reverse.selectSingle(4));
+        QVERIFY(reverse.selectSingle(5));
+        QVERIFY(reverse.selectSingle(0));
+        QVERIFY(reverse.selectSingle(1));
+        QVERIFY(reverse.completeEndpointSelection(PLAYER_COUNT, false).has_value());
+        QVERIFY(reverse.selectedCardIds() == ids);
+        QVERIFY(reverse.isSelected(0));
+        QVERIFY(reverse.isSelected(5));
+    }
+
+    void testConsecutivePairCompletionNeedsTwoCopiesOfEveryMiddleRank() {
+        // P03 中间点数只有一张时不补
+        const auto cards = handOfCounts({{Rank::Four, 2}, {Rank::Five, 1}, {Rank::Six, 2}});
+        HandListModel model;
+        QVERIFY(model.setCards(cards));
+        QCOMPARE(model.rowCount(), 5);
+        QVERIFY(model.selectSingle(0));
+        QVERIFY(model.selectSingle(1));
+        QVERIFY(model.selectSingle(3));
+        QVERIFY(model.selectSingle(4));
+        QVERIFY(!model.completeEndpointSelection(PLAYER_COUNT, false).has_value());
+        QCOMPARE(model.selectedCount(), 4);
+    }
+
+    void testConsecutivePairCompletionRequiresThreePairs() {
+        // P04 只有两对时不补
+        const auto cards = sequenceOfHand(Rank::Four, 2, 2);
+        HandListModel model;
+        QVERIFY(model.setCards(cards));
+        QCOMPARE(model.rowCount(), 4);
+        QVERIFY(model.selectSingle(0));
+        QVERIFY(model.selectSingle(1));
+        QVERIFY(model.selectSingle(2));
+        QVERIFY(model.selectSingle(3));
+        QVERIFY(!model.completeEndpointSelection(PLAYER_COUNT, false).has_value());
+        QCOMPARE(model.selectedCount(), 4);
+    }
+
+    void testConsecutivePairCompletionTakesExactlyTwoPerRank() {
+        // P05 同点三张/四张时每个中间点数只补两张
+        const auto cards = handOfCounts({{Rank::Four, 3}, {Rank::Five, 4}, {Rank::Six, 4}});
+        HandListModel model;
+        QVERIFY(model.setCards(cards));
+        QCOMPARE(model.rowCount(), 11);
+        QVERIFY(model.selectSingle(0));
+        QVERIFY(model.selectSingle(1));
+        QVERIFY(model.selectSingle(7));
+        QVERIFY(model.selectSingle(8));
+        const auto pattern = model.completeEndpointSelection(PLAYER_COUNT, false);
+        QVERIFY(pattern.has_value());
+        QCOMPARE(pattern->type, CardPatternType::ConsecutivePairs);
+        QCOMPARE(model.selectedCount(), 6);
+        QCOMPARE(model.unselectedCountOfRank(Rank::Four), 1);
+        QCOMPARE(model.unselectedCountOfRank(Rank::Five), 2);
+        QCOMPARE(model.unselectedCountOfRank(Rank::Six), 2);
+    }
+
+    void testSelectedTripleGroupIsNotShrunkIntoConsecutivePairs() {
+        // P06 整组三张保持三张，不偷偷删一张
+        const auto cards = handOfCounts({{Rank::Four, 3}, {Rank::Five, 2}, {Rank::Six, 2}});
+        HandListModel model;
+        QVERIFY(model.setCards(cards));
+        QCOMPARE(model.selectGroup(0).newlySelectedCount, 3);
+        int sixRow = -1;
+        for (int row = 0; row < model.rowCount(); ++row) {
+            if (model.cardAt(row).rank() == Rank::Six) {
+                sixRow = row;
+                break;
+            }
+        }
+        QVERIFY(sixRow > 0);
+        QCOMPARE(model.selectGroup(sixRow).newlySelectedCount, 2);
+        QCOMPARE(model.selectedCount(), 5);
+        QVERIFY(!model.completeEndpointSelection(PLAYER_COUNT, false).has_value());
+        QCOMPARE(model.selectedCount(), 5);
+        QVERIFY(model.isSelected(2));
+        QCOMPARE(model.unselectedCountOfRank(Rank::Four), 0);
+    }
+
+    void testSingleCardsOfTwoRanksAreNotGuessedAsPairs() {
+        // P07 一张 4 加一张 6 不猜成连对
+        const auto cards = handOfCounts({{Rank::Four, 2}, {Rank::Five, 2}, {Rank::Six, 2}});
+        HandListModel model;
+        QVERIFY(model.setCards(cards));
+        QVERIFY(model.selectSingle(0));
+        QVERIFY(model.selectSingle(4));
+        QCOMPARE(model.cardAt(4).rank(), Rank::Six);
+        QVERIFY(!model.completeEndpointSelection(PLAYER_COUNT, false).has_value());
+        QVERIFY(!model.completeEndpointSelection(PLAYER_COUNT, true).has_value());
+        QCOMPARE(model.selectedCount(), 2);
+    }
+
+    void testAsymmetricEndpointsDoNotComplete() {
+        // P08 两张 4 加一张 6 形状不对称
+        const auto cards = handOfCounts({{Rank::Four, 2}, {Rank::Five, 2}, {Rank::Six, 2}});
+        HandListModel model;
+        QVERIFY(model.setCards(cards));
+        QVERIFY(model.selectSingle(0));
+        QVERIFY(model.selectSingle(1));
+        QVERIFY(model.selectSingle(4));
+        QVERIFY(!model.completeEndpointSelection(PLAYER_COUNT, false).has_value());
+        QCOMPARE(model.selectedCount(), 3);
+    }
+
+    void testExtraSelectionBlocksConsecutivePairCompletion() {
+        // P09 额外点数阻止补牌且不被删除
+        const auto cards = handOfCounts({{Rank::Four, 2}, {Rank::Five, 2},
+                                         {Rank::Six, 2}, {Rank::Nine, 1}});
+        HandListModel model;
+        QVERIFY(model.setCards(cards));
+        QVERIFY(model.selectSingle(0));
+        QVERIFY(model.selectSingle(1));
+        QVERIFY(model.selectSingle(4));
+        QVERIFY(model.selectSingle(5));
+        QVERIFY(model.selectSingle(6));
+        QCOMPARE(model.cardAt(6).rank(), Rank::Nine);
+        QVERIFY(!model.completeEndpointSelection(PLAYER_COUNT, false).has_value());
+        QCOMPARE(model.selectedCount(), 5);
+        QVERIFY(model.isSelected(6));
+    }
+
+    void testConsecutivePairCompletionAcrossFaceCardsAndRejectsTwo() {
+        // P10 J—A 四对可补；端点含 2 不能跨 2
+        const auto face = sequenceOfHand(Rank::Jack, 4, 2);
+        HandListModel model;
+        QVERIFY(model.setCards(face));
+        QCOMPARE(model.rowCount(), 8);
+        QVERIFY(model.selectSingle(0));
+        QVERIFY(model.selectSingle(1));
+        QVERIFY(model.selectSingle(6));
+        QVERIFY(model.selectSingle(7));
+        const auto pattern = model.completeEndpointSelection(PLAYER_COUNT, false);
+        QVERIFY(pattern.has_value());
+        QCOMPARE(pattern->mainRank, Rank::Jack);
+        QCOMPARE(pattern->mainLength, 4);
+        QCOMPARE(model.selectedCount(), 8);
+
+        std::vector<Card> withTwo = sequenceOfHand(Rank::Queen, 3, 2);
+        const auto twos = handOfCounts({{Rank::Two, 2}});
+        withTwo.insert(withTwo.end(), twos.begin(), twos.end());
+        HandListModel rejected;
+        QVERIFY(rejected.setCards(withTwo));
+        QCOMPARE(rejected.rowCount(), 8);
+        int twoRow = -1;
+        for (int row = 0; row < rejected.rowCount(); ++row) {
+            if (rejected.cardAt(row).rank() == Rank::Two) {
+                twoRow = row;
+                break;
+            }
+        }
+        QVERIFY(twoRow > 0);
+        QVERIFY(rejected.selectSingle(0));
+        QVERIFY(rejected.selectSingle(1));
+        QVERIFY(rejected.selectSingle(twoRow));
+        QVERIFY(rejected.selectSingle(twoRow + 1));
+        QVERIFY(!rejected.completeEndpointSelection(PLAYER_COUNT, false).has_value());
+        QCOMPARE(rejected.selectedCount(), 4);
+    }
+
+    void testFullAceChainCompletionInFourPlayerMode() {
+        // P11 四人两副牌 3 到 A 各两张共 24 张
+        const auto cards = sequenceOfHand(Rank::Three, 12, 2);
+        HandListModel model;
+        QVERIFY(model.setCards(cards));
+        QCOMPARE(model.rowCount(), 24);
+        QVERIFY(model.selectSingle(0));
+        QVERIFY(model.selectSingle(1));
+        QVERIFY(model.selectSingle(22));
+        QVERIFY(model.selectSingle(23));
+        const auto pattern = model.completeEndpointSelection(PLAYER_COUNT, false);
+        QVERIFY(pattern.has_value());
+        QCOMPARE(pattern->type, CardPatternType::ConsecutivePairs);
+        QCOMPARE(pattern->mainRank, Rank::Three);
+        QCOMPARE(pattern->mainLength, 12);
+        QCOMPARE(pattern->totalCards, 24);
+        QCOMPARE(model.selectedCount(), 24);
+        auto ids = model.selectedCardIds();
+        std::sort(ids.begin(), ids.end());
+        QCOMPARE(static_cast<int>(std::unique(ids.begin(), ids.end()) - ids.begin()), 24);
+    }
+
+    void testTripleAndBombGroupsAreNotCompletedIntoAirplanes() {
+        // P12 首尾各三张/各四张都不自动补飞机
+        const auto triples = handOfCounts({{Rank::Three, 3}, {Rank::Four, 3}});
+        HandListModel tripleModel;
+        QVERIFY(tripleModel.setCards(triples));
+        QCOMPARE(tripleModel.selectGroup(0).newlySelectedCount, 3);
+        int fourRow = -1;
+        for (int row = 0; row < tripleModel.rowCount(); ++row) {
+            if (tripleModel.cardAt(row).rank() == Rank::Four) {
+                fourRow = row;
+                break;
+            }
+        }
+        QVERIFY(fourRow > 0);
+        QCOMPARE(tripleModel.selectGroup(fourRow).newlySelectedCount, 3);
+        QCOMPARE(tripleModel.selectedCount(), 6);
+        QVERIFY(!tripleModel.completeEndpointSelection(PLAYER_COUNT, false).has_value());
+        QCOMPARE(tripleModel.selectedCount(), 6);
+
+        const auto bombs = handOfCounts({{Rank::Three, 4}, {Rank::Four, 4}});
+        HandListModel bombModel;
+        QVERIFY(bombModel.setCards(bombs));
+        QCOMPARE(bombModel.selectGroup(0).newlySelectedCount, 4);
+        int fourRowInBombs = -1;
+        for (int row = 0; row < bombModel.rowCount(); ++row) {
+            if (bombModel.cardAt(row).rank() == Rank::Four) {
+                fourRowInBombs = row;
+                break;
+            }
+        }
+        QVERIFY(fourRowInBombs > 0);
+        QCOMPARE(bombModel.selectGroup(fourRowInBombs).newlySelectedCount, 4);
+        QCOMPARE(bombModel.selectedCount(), 8);
+        QVERIFY(!bombModel.completeEndpointSelection(PLAYER_COUNT, false).has_value());
+        QCOMPARE(bombModel.selectedCount(), 8);
+    }
+
+    void testStraightAndPairsShapesStayDistinct() {
+        // P13 1+1 只顺子、2+2 只连对
+        const auto cards = sequenceOfHand(Rank::Four, 3, 2);
+        HandListModel singleModel;
+        QVERIFY(singleModel.setCards(cards));
+        QVERIFY(singleModel.selectSingle(0));
+        QVERIFY(singleModel.selectSingle(4));
+        QVERIFY(!singleModel.completeEndpointSelection(PLAYER_COUNT, true).has_value());
+        QCOMPARE(singleModel.selectedCount(), 2);
+
+        HandListModel pairModel;
+        QVERIFY(pairModel.setCards(cards));
+        QVERIFY(pairModel.selectSingle(0));
+        QVERIFY(pairModel.selectSingle(1));
+        QVERIFY(pairModel.selectSingle(4));
+        QVERIFY(pairModel.selectSingle(5));
+        const auto pattern = pairModel.completeEndpointSelection(PLAYER_COUNT, true);
+        QVERIFY(pattern.has_value());
+        QCOMPARE(pattern->type, CardPatternType::ConsecutivePairs);
+        QCOMPARE(pairModel.selectedCount(), 6);
+    }
+
+    void testCompletionChangesOnlySelectionState() {
+        // I01 补牌前后手牌行数、每张实体与总数都不变
+        const auto cards = sequenceOfHand(Rank::Three, 5, 1);
+        HandListModel model;
+        QVERIFY(model.setCards(cards));
+        std::vector<CardId> idsBefore;
+        for (int row = 0; row < model.rowCount(); ++row) {
+            idsBefore.push_back(model.cardAt(row).id());
+        }
+        const int rowsBefore = model.rowCount();
+        QVERIFY(model.selectSingle(0));
+        QVERIFY(model.selectSingle(4));
+        QVERIFY(model.completeEndpointSelection(PLAYER_COUNT, true).has_value());
+        QCOMPARE(model.rowCount(), rowsBefore);
+        std::vector<CardId> idsAfter;
+        for (int row = 0; row < model.rowCount(); ++row) {
+            idsAfter.push_back(model.cardAt(row).id());
+        }
+        QVERIFY(idsAfter == idsBefore);
+    }
+
+    void testCompletionKeepsSingleSelectionSpeechRoles() {
+        // I02 端点保留单张朗读标记，自动补入的中间牌按整组朗读
+        const auto cards = sequenceOfHand(Rank::Three, 5, 1);
+        HandListModel model;
+        QVERIFY(model.setCards(cards));
+        QVERIFY(model.selectSingle(0));
+        QCOMPARE(model.data(model.index(0, 0), Qt::AccessibleTextRole).toString(),
+                 QStringLiteral("3"));
+        QVERIFY(model.selectSingle(4));
+        QVERIFY(model.completeEndpointSelection(PLAYER_COUNT, true).has_value());
+        QCOMPARE(model.data(model.index(0, 0), Qt::AccessibleTextRole).toString(),
+                 QStringLiteral("3"));
+        QCOMPARE(model.data(model.index(4, 0), Qt::AccessibleTextRole).toString(),
+                 QStringLiteral("7"));
+        QCOMPARE(model.data(model.index(1, 0), Qt::AccessibleTextRole).toString(),
+                 QString::fromUtf8(u8"1张4"));
+        QCOMPARE(model.data(model.index(3, 0), Qt::AccessibleTextRole).toString(),
+                 QString::fromUtf8(u8"1张6"));
+    }
+
+    void testCompletionAppendsAddedCardsAfterManualPicks() {
+        // I03 手动端点在前，自动补入按行号在后
+        const auto cards = sequenceOfHand(Rank::Three, 5, 1);
+        HandListModel model;
+        QVERIFY(model.setCards(cards));
+        QVERIFY(model.selectSingle(4));
+        QVERIFY(model.selectSingle(0));
+        QVERIFY(model.completeEndpointSelection(PLAYER_COUNT, true).has_value());
+        std::vector<Rank> order;
+        while (const auto card = model.deselectNextPickedCard()) {
+            order.push_back(card->rank());
+        }
+        const std::vector<Rank> expected = {Rank::Seven, Rank::Three, Rank::Four,
+                                           Rank::Five, Rank::Six};
+        QVERIFY(order == expected);
+    }
+
+    void testClearAndNewCardsDropPreviousCompletionState() {
+        // I04 清空与换牌组不残留上次补牌状态
+        const auto cards = sequenceOfHand(Rank::Three, 5, 1);
+        HandListModel model;
+        QVERIFY(model.setCards(cards));
+        QVERIFY(model.selectSingle(0));
+        QVERIFY(model.selectSingle(4));
+        QVERIFY(model.completeEndpointSelection(PLAYER_COUNT, true).has_value());
+        model.clearSelection();
+        QCOMPARE(model.selectedCount(), 0);
+        QVERIFY(!model.completeEndpointSelection(PLAYER_COUNT, true).has_value());
+        QVERIFY(model.selectSingle(0));
+        QVERIFY(model.selectSingle(4));
+        QVERIFY(model.completeEndpointSelection(PLAYER_COUNT, true).has_value());
+        QCOMPARE(model.selectedCount(), 5);
+
+        HandListModel replaced;
+        QVERIFY(replaced.setCards(cards));
+        QVERIFY(replaced.selectSingle(0));
+        QVERIFY(replaced.selectSingle(4));
+        QVERIFY(replaced.completeEndpointSelection(PLAYER_COUNT, true).has_value());
+        QVERIFY(replaced.setCards(sequenceOfHand(Rank::Seven, 5, 1)));
+        QCOMPARE(replaced.selectedCount(), 0);
+        QVERIFY(replaced.selectedCardIds().empty());
+    }
+
+    void testCompletionEmitsSingleFinalDataChanged() {
+        // I06 成功补牌只发一次最终选择变化信号，收信号时已是完整目标集合
+        const auto cards = sequenceOfHand(Rank::Three, 5, 1);
+        HandListModel model;
+        QVERIFY(model.setCards(cards));
+        QVERIFY(model.selectSingle(0));
+        QVERIFY(model.selectSingle(4));
+        int changes = 0;
+        int countAtSignal = -1;
+        int topRow = -1;
+        int bottomRow = -1;
+        QObject::connect(&model, &QAbstractItemModel::dataChanged,
+            [&](const QModelIndex& topLeft, const QModelIndex& bottomRight,
+                const QVector<int>& roles) {
+                ++changes;
+                countAtSignal = model.selectedCount();
+                topRow = topLeft.row();
+                bottomRow = bottomRight.row();
+                QCOMPARE(roles, QVector<int>{static_cast<int>(HandListModel::SelectedRole)});
+            });
+        QVERIFY(model.completeEndpointSelection(PLAYER_COUNT, true).has_value());
+        QCOMPARE(changes, 1);
+        QCOMPARE(countAtSignal, 5);
+        QCOMPARE(topRow, 1);
+        QCOMPARE(bottomRow, 3);
+    }
+
+    // ===== 首尾选牌辅助：真实 Qt / Windows 交互用例（U 系列）=====
+
+    void testQtTakeEndpointCompletesStraightWithSingleAnnouncement() {
+        // U01 真实键盘拿起 3 与 7 自动补齐；U03 只有一次范围公告与一次拿牌动作；U10 引擎状态不变
+        QTemporaryDir traceDir;
+        QVERIFY(traceDir.isValid());
+        DiagnosticTraceService trace;
+        trace.init(traceDir.path());
+
+        GameEngine engine;
+        preparePlayingHand(engine, sequenceOfHand(Rank::Three, 5, 1));
+        auto& fullState = engine.state().fullState();
+
+        AccessibilityService accessibility;
+        MainWindow window(engine, accessibility, &trace);
+        window.show();
+        QVERIFY(QTest::qWaitForWindowActive(&window));
+        window.refreshFromState();
+
+        auto* handView = window.findChild<QListView*>();
+        QVERIFY(handView);
+        auto* handModel = qobject_cast<HandListModel*>(handView->model());
+        QVERIFY(handModel);
+        QCOMPARE(handModel->rowCount(), 5);
+        auto* statusLabel = window.statusBar()->findChild<QLabel*>();
+        QVERIFY(statusLabel);
+
+        const size_t handSizeBefore = fullState.players[0].hand.size();
+        const PlayerId currentBefore = fullState.currentPlayer;
+        const uint64_t sequenceBefore = fullState.eventSequence;
+        const size_t lastPlayedBefore = fullState.lastPlayedCards.size();
+
+        QTest::keyClick(&window, Qt::Key_Home);
+        QTest::keyClick(&window, Qt::Key_Up);
+        QCOMPARE(handModel->selectedCount(), 1);
+        QCOMPARE(statusLabel->accessibleName(), QStringLiteral("3"));
+
+        QTest::keyClick(&window, Qt::Key_End);
+        QCOMPARE(handView->currentIndex().row(), 4);
+        // 浏览键本身也会产生一次公告，因此在真正补牌的动作之前取基线。
+        trace.flush();
+        const int speechBefore = traceCount(trace, QStringLiteral("speech_delivery"));
+        const int actionsBefore = traceCount(trace, QStringLiteral("hand_action"));
+        QTest::keyClick(&window, Qt::Key_Up);
+        trace.flush();
+
+        QCOMPARE(handModel->selectedCount(), 5);
+        for (int row = 0; row < 5; ++row) QVERIFY(handModel->isSelected(row));
+        QCOMPARE(statusLabel->accessibleName(), QString::fromUtf8(u8"3到7顺子"));
+
+        QCOMPARE(traceCount(trace, QStringLiteral("speech_delivery")) - speechBefore, 1);
+        QCOMPARE(traceCount(trace, QStringLiteral("hand_action")) - actionsBefore, 1);
+
+        QCOMPARE(fullState.players[0].hand.size(), handSizeBefore);
+        QCOMPARE(fullState.currentPlayer, currentBefore);
+        QCOMPARE(fullState.eventSequence, sequenceBefore);
+        QCOMPARE(fullState.lastPlayedCards.size(), lastPlayedBefore);
+
+        auto* table = window.findChild<CardTableWidget*>(QStringLiteral("visualCardTable"));
+        QVERIFY(table);
+        QCOMPARE(table->displayedSelectedCardCount(), 5);
+
+        engine.state().setPhase(GamePhase::NotStarted);
+        window.close();
+    }
+
+    void testQtTakeEndpointCompletesStraightInReverseDirection() {
+        // U02 先 7 后 3 同样成立，焦点留在第二端点，浏览规则不变
+        GameEngine engine;
+        preparePlayingHand(engine, sequenceOfHand(Rank::Three, 7, 1));
+        AccessibilityService accessibility;
+        MainWindow window(engine, accessibility);
+        window.show();
+        QVERIFY(QTest::qWaitForWindowActive(&window));
+        window.refreshFromState();
+
+        auto* handView = window.findChild<QListView*>();
+        QVERIFY(handView);
+        auto* handModel = qobject_cast<HandListModel*>(handView->model());
+        QVERIFY(handModel);
+        QCOMPARE(handModel->rowCount(), 7);
+        auto* statusLabel = window.statusBar()->findChild<QLabel*>();
+        QVERIFY(statusLabel);
+
+        QTest::keyClick(&window, Qt::Key_End);
+        QCOMPARE(handView->currentIndex().row(), 6);
+        QTest::keyClick(&window, Qt::Key_Left, Qt::ShiftModifier);
+        QTest::keyClick(&window, Qt::Key_Left, Qt::ShiftModifier);
+        QCOMPARE(handView->currentIndex().row(), 4);
+        QCOMPARE(handModel->cardAt(handView->currentIndex().row()).rank(), Rank::Seven);
+        QTest::keyClick(&window, Qt::Key_Up);
+        QCOMPARE(handModel->selectedCount(), 1);
+        QTest::keyClick(&window, Qt::Key_Home);
+        QCOMPARE(handView->currentIndex().row(), 0);
+        QTest::keyClick(&window, Qt::Key_Up);
+        QCOMPARE(handModel->selectedCount(), 5);
+        QCOMPARE(handView->currentIndex().row(), 0);
+        QCOMPARE(statusLabel->accessibleName(), QString::fromUtf8(u8"3到7顺子"));
+        QVERIFY(!handModel->isSelected(5));
+        QVERIFY(!handModel->isSelected(6));
+
+        QTest::keyClick(&window, Qt::Key_Right);
+        QCOMPARE(handView->currentIndex().row(), 5);
+        QVERIFY(!handModel->isSelected(handView->currentIndex().row()));
+        QTest::keyClick(&window, Qt::Key_Right, Qt::ShiftModifier);
+        QCOMPARE(handView->currentIndex().row(), 6);
+        QVERIFY(!handModel->isSelected(handView->currentIndex().row()));
+
+        engine.state().setPhase(GamePhase::NotStarted);
+        window.close();
+    }
+
+    void testIncompleteEndpointKeepsSingleCardSpeech() {
+        // U04 缺 6 时第二张 7 仍按单张朗读，选择保持两张
+        GameEngine engine;
+        preparePlayingHand(engine,
+            handOfCounts({{Rank::Three, 1}, {Rank::Four, 1}, {Rank::Five, 1}, {Rank::Seven, 1}}));
+        AccessibilityService accessibility;
+        MainWindow window(engine, accessibility);
+        window.show();
+        QVERIFY(QTest::qWaitForWindowActive(&window));
+        window.refreshFromState();
+
+        auto* handView = window.findChild<QListView*>();
+        QVERIFY(handView);
+        auto* handModel = qobject_cast<HandListModel*>(handView->model());
+        QVERIFY(handModel);
+        QCOMPARE(handModel->rowCount(), 4);
+        auto* statusLabel = window.statusBar()->findChild<QLabel*>();
+        QVERIFY(statusLabel);
+
+        QTest::keyClick(&window, Qt::Key_Home);
+        QTest::keyClick(&window, Qt::Key_Up);
+        QCOMPARE(handModel->selectedCount(), 1);
+        QCOMPARE(statusLabel->accessibleName(), QStringLiteral("3"));
+        QTest::keyClick(&window, Qt::Key_End);
+        QCOMPARE(handView->currentIndex().row(), 3);
+        QTest::keyClick(&window, Qt::Key_Up);
+        QCOMPARE(handModel->selectedCount(), 2);
+        QCOMPARE(statusLabel->accessibleName(), QStringLiteral("7"));
+        QVERIFY(handModel->isSelected(0));
+        QVERIFY(handModel->isSelected(3));
+
+        engine.state().setPhase(GamePhase::NotStarted);
+        window.close();
+    }
+
+    void testCompletionKeepsRemainingSameRankCardsBrowsable() {
+        // U05 同点多张时剩余牌仍可正常浏览
+        GameEngine engine;
+        preparePlayingHand(engine,
+            handOfCounts({{Rank::Three, 2}, {Rank::Four, 1}, {Rank::Five, 1},
+                          {Rank::Six, 1}, {Rank::Seven, 2}}));
+        AccessibilityService accessibility;
+        MainWindow window(engine, accessibility);
+        window.show();
+        QVERIFY(QTest::qWaitForWindowActive(&window));
+        window.refreshFromState();
+
+        auto* handView = window.findChild<QListView*>();
+        QVERIFY(handView);
+        auto* handModel = qobject_cast<HandListModel*>(handView->model());
+        QVERIFY(handModel);
+        QCOMPARE(handModel->rowCount(), 7);
+
+        QTest::keyClick(&window, Qt::Key_Home);
+        QTest::keyClick(&window, Qt::Key_Up);
+        QTest::keyClick(&window, Qt::Key_End);
+        QTest::keyClick(&window, Qt::Key_Up);
+        QCOMPARE(handModel->selectedCount(), 5);
+        QCOMPARE(handModel->unselectedCountOfRank(Rank::Three), 1);
+        QCOMPARE(handModel->unselectedCountOfRank(Rank::Seven), 1);
+
+        QTest::keyClick(&window, Qt::Key_Left);
+        QCOMPARE(handView->currentIndex().row(), 1);
+        QVERIFY(!handModel->isSelected(handView->currentIndex().row()));
+        QTest::keyClick(&window, Qt::Key_End);
+        QCOMPARE(handView->currentIndex().row(), 6);
+        QVERIFY(!handModel->isSelected(handView->currentIndex().row()));
+
+        engine.state().setPhase(GamePhase::NotStarted);
+        window.close();
+    }
+
+    void testGroupEntryCompletesConsecutivePairs() {
+        // U06 两次 Ctrl+上 拿完整对子组使选择成为 2+2 时补连对
+        GameEngine engine;
+        preparePlayingHand(engine,
+            handOfCounts({{Rank::Four, 2}, {Rank::Five, 2}, {Rank::Six, 2}, {Rank::Nine, 3}}));
+        AccessibilityService accessibility;
+        MainWindow window(engine, accessibility);
+        window.show();
+        QVERIFY(QTest::qWaitForWindowActive(&window));
+        window.refreshFromState();
+
+        auto* handView = window.findChild<QListView*>();
+        QVERIFY(handView);
+        auto* handModel = qobject_cast<HandListModel*>(handView->model());
+        QVERIFY(handModel);
+        QCOMPARE(handModel->rowCount(), 9);
+        auto* statusLabel = window.statusBar()->findChild<QLabel*>();
+        QVERIFY(statusLabel);
+
+        QTest::keyClick(&window, Qt::Key_Home);
+        QTest::keyClick(&window, Qt::Key_Up, Qt::ControlModifier);
+        QCOMPARE(handModel->selectedCount(), 2);
+        QCOMPARE(statusLabel->accessibleName(), QString::fromUtf8(u8"对4"));
+        QTest::keyClick(&window, Qt::Key_Right);
+        QTest::keyClick(&window, Qt::Key_Right);
+        QCOMPARE(handView->currentIndex().row(), 4);
+        QTest::keyClick(&window, Qt::Key_Up, Qt::ControlModifier);
+        QCOMPARE(handModel->selectedCount(), 6);
+        QCOMPARE(statusLabel->accessibleName(), QString::fromUtf8(u8"4到6连对"));
+        QVERIFY(handModel->isSelected(0));
+        QVERIFY(handModel->isSelected(1));
+        QVERIFY(handModel->isSelected(2));
+        QVERIFY(handModel->isSelected(3));
+        QVERIFY(handModel->isSelected(4));
+        QVERIFY(handModel->isSelected(5));
+        QVERIFY(!handModel->isSelected(6));
+
+        QTest::keyClick(&window, Qt::Key_Down, Qt::ControlModifier);
+        QCOMPARE(handModel->selectedCount(), 0);
+        QCOMPARE(statusLabel->accessibleName(), QString::fromUtf8(u8"4到6连对"));
+
+        engine.state().setPhase(GamePhase::NotStarted);
+        window.close();
+    }
+
+    void testGroupEntryKeepsTripleUnchanged() {
+        // U06 续：点数组三张时保留三张，不伪造 2+2
+        GameEngine engine;
+        preparePlayingHand(engine, handOfCounts({{Rank::Three, 3}, {Rank::Six, 2}}));
+        AccessibilityService accessibility;
+        MainWindow window(engine, accessibility);
+        window.show();
+        QVERIFY(QTest::qWaitForWindowActive(&window));
+        window.refreshFromState();
+
+        auto* handView = window.findChild<QListView*>();
+        QVERIFY(handView);
+        auto* handModel = qobject_cast<HandListModel*>(handView->model());
+        QVERIFY(handModel);
+        QCOMPARE(handModel->rowCount(), 5);
+        auto* statusLabel = window.statusBar()->findChild<QLabel*>();
+        QVERIFY(statusLabel);
+
+        QTest::keyClick(&window, Qt::Key_Home);
+        QTest::keyClick(&window, Qt::Key_Up, Qt::ControlModifier);
+        QCOMPARE(handModel->selectedCount(), 3);
+        QCOMPARE(statusLabel->accessibleName(), QString::fromUtf8(u8"3张3"));
+        QTest::keyClick(&window, Qt::Key_Right);
+        QCOMPARE(handView->currentIndex().row(), 3);
+        QTest::keyClick(&window, Qt::Key_Up, Qt::ControlModifier);
+        QCOMPARE(handModel->selectedCount(), 5);
+        QCOMPARE(statusLabel->accessibleName(), QString::fromUtf8(u8"对6"));
+        QVERIFY(handModel->isSelected(0));
+        QVERIFY(handModel->isSelected(1));
+        QVERIFY(handModel->isSelected(2));
+
+        engine.state().setPhase(GamePhase::NotStarted);
+        window.close();
+    }
+
+    void testPutDownAfterCompletionReleasesOneAndIsNotRefilled() {
+        // U07 下键一次只放下一张；焦点已选先放焦点牌，否则按拿起顺序
+        GameEngine engine;
+        preparePlayingHand(engine, sequenceOfHand(Rank::Three, 5, 1));
+        AccessibilityService accessibility;
+        MainWindow window(engine, accessibility);
+        window.show();
+        QVERIFY(QTest::qWaitForWindowActive(&window));
+        window.refreshFromState();
+
+        auto* handView = window.findChild<QListView*>();
+        QVERIFY(handView);
+        auto* handModel = qobject_cast<HandListModel*>(handView->model());
+        QVERIFY(handModel);
+
+        QTest::keyClick(&window, Qt::Key_Home);
+        QTest::keyClick(&window, Qt::Key_Up);
+        QTest::keyClick(&window, Qt::Key_End);
+        QTest::keyClick(&window, Qt::Key_Up);
+        QCOMPARE(handModel->selectedCount(), 5);
+
+        QTest::keyClick(&window, Qt::Key_Down);
+        QCOMPARE(handModel->selectedCount(), 4);
+        QVERIFY(!handModel->isSelected(4));
+        QTest::keyClick(&window, Qt::Key_Down);
+        QCOMPARE(handModel->selectedCount(), 3);
+        QVERIFY(!handModel->isSelected(0));
+        QVERIFY(handModel->isSelected(1));
+        QVERIFY(handModel->isSelected(3));
+
+        window.refreshFromState();
+        QCOMPARE(handModel->selectedCount(), 3);
+        QVERIFY(!handModel->isSelected(0));
+        QVERIFY(!handModel->isSelected(4));
+
+        engine.state().setPhase(GamePhase::NotStarted);
+        window.close();
+    }
+
+    void testControlDownAnnouncesRangeForCompletedStraight() {
+        // U08 Ctrl+下全部放下时用放下前完整连牌范围朗读
+        GameEngine engine;
+        preparePlayingHand(engine, sequenceOfHand(Rank::Three, 5, 1));
+        AccessibilityService accessibility;
+        MainWindow window(engine, accessibility);
+        window.show();
+        QVERIFY(QTest::qWaitForWindowActive(&window));
+        window.refreshFromState();
+
+        auto* handView = window.findChild<QListView*>();
+        QVERIFY(handView);
+        auto* handModel = qobject_cast<HandListModel*>(handView->model());
+        QVERIFY(handModel);
+        auto* statusLabel = window.statusBar()->findChild<QLabel*>();
+        QVERIFY(statusLabel);
+
+        QTest::keyClick(&window, Qt::Key_Home);
+        QTest::keyClick(&window, Qt::Key_Up);
+        QTest::keyClick(&window, Qt::Key_End);
+        QTest::keyClick(&window, Qt::Key_Up);
+        QCOMPARE(handModel->selectedCount(), 5);
+        QTest::keyClick(&window, Qt::Key_Down, Qt::ControlModifier);
+        QCOMPARE(handModel->selectedCount(), 0);
+        QCOMPARE(statusLabel->accessibleName(), QString::fromUtf8(u8"3到7顺子"));
+
+        auto* table = window.findChild<CardTableWidget*>(QStringLiteral("visualCardTable"));
+        QVERIFY(table);
+        QCOMPARE(table->displayedSelectedCardCount(), 0);
+
+        engine.state().setPhase(GamePhase::NotStarted);
+        window.close();
+    }
+
+    void testControlDownKeepsGroupTextForMixedSelection() {
+        // U09 不构成牌型的混合选择仍然保留旧组文案
+        GameEngine engine;
+        preparePlayingHand(engine, handOfCounts({{Rank::Three, 3}, {Rank::Six, 2}}));
+        AccessibilityService accessibility;
+        MainWindow window(engine, accessibility);
+        window.show();
+        QVERIFY(QTest::qWaitForWindowActive(&window));
+        window.refreshFromState();
+
+        auto* handView = window.findChild<QListView*>();
+        QVERIFY(handView);
+        auto* handModel = qobject_cast<HandListModel*>(handView->model());
+        QVERIFY(handModel);
+        auto* statusLabel = window.statusBar()->findChild<QLabel*>();
+        QVERIFY(statusLabel);
+
+        QTest::keyClick(&window, Qt::Key_Home);
+        QTest::keyClick(&window, Qt::Key_Up, Qt::ControlModifier);
+        QTest::keyClick(&window, Qt::Key_Right);
+        QTest::keyClick(&window, Qt::Key_Up, Qt::ControlModifier);
+        QCOMPARE(handModel->selectedCount(), 5);
+        QTest::keyClick(&window, Qt::Key_Down, Qt::ControlModifier);
+        QCOMPARE(handModel->selectedCount(), 0);
+        QCOMPARE(statusLabel->accessibleName(), QString::fromUtf8(u8"3张3、对6"));
+
+        engine.state().setPhase(GamePhase::NotStarted);
+        window.close();
+    }
+
+    void testEnterSubmitsExactlySelectedStraight() {
+        // U11 按回车才真正出牌，提交的正是所选实体
+        GameEngine engine;
+        preparePlayingHand(engine, sequenceOfHand(Rank::Three, 5, 1));
+        AccessibilityService accessibility;
+        MainWindow window(engine, accessibility);
+        window.show();
+        QVERIFY(QTest::qWaitForWindowActive(&window));
+        window.refreshFromState();
+
+        auto* handView = window.findChild<QListView*>();
+        QVERIFY(handView);
+        auto* handModel = qobject_cast<HandListModel*>(handView->model());
+        QVERIFY(handModel);
+
+        QTest::keyClick(&window, Qt::Key_Home);
+        QTest::keyClick(&window, Qt::Key_Up);
+        QTest::keyClick(&window, Qt::Key_End);
+        QTest::keyClick(&window, Qt::Key_Up);
+        QCOMPARE(handModel->selectedCount(), 5);
+        auto& fullState = engine.state().fullState();
+        QCOMPARE(fullState.players[0].hand.size(), size_t(5));
+
+        QTest::keyClick(&window, Qt::Key_Return);
+        QCOMPARE(fullState.players[0].hand.size(), size_t(0));
+        QCOMPARE(fullState.lastPlayedCards.size(), size_t(5));
+        QCOMPARE(handModel->selectedCount(), 0);
+        for (int row = 0; row < handModel->rowCount(); ++row) {
+            QVERIFY(!handModel->isSelected(row));
+        }
+
+        engine.state().setPhase(GamePhase::NotStarted);
+        window.close();
+    }
+
+    void testRejectedSelectionKeepsHandAndTurn() {
+        // U12 压不过上一手时回车失败，不扣牌、不轮转、规则不改
+        GameEngine engine;
+        preparePlayingHand(engine, sequenceOfHand(Rank::Three, 5, 1));
+        auto& fullState = engine.state().fullState();
+        fullState.lastPlayedBy = PlayerId::Player2;
+        fullState.lastPlayedCards = handOfCounts({{Rank::Nine, 2}});
+        fullState.consecutivePasses = 0;
+        fullState.eventSequence = 0;
+
+        AccessibilityService accessibility;
+        MainWindow window(engine, accessibility);
+        window.show();
+        QVERIFY(QTest::qWaitForWindowActive(&window));
+        window.refreshFromState();
+
+        auto* handView = window.findChild<QListView*>();
+        QVERIFY(handView);
+        auto* handModel = qobject_cast<HandListModel*>(handView->model());
+        QVERIFY(handModel);
+
+        QTest::keyClick(&window, Qt::Key_Home);
+        QTest::keyClick(&window, Qt::Key_Up);
+        QTest::keyClick(&window, Qt::Key_End);
+        QTest::keyClick(&window, Qt::Key_Up);
+        QCOMPARE(handModel->selectedCount(), 5);
+        const size_t handSizeBefore = fullState.players[0].hand.size();
+        const PlayerId currentBefore = fullState.currentPlayer;
+        const size_t lastPlayedBefore = fullState.lastPlayedCards.size();
+
+        QTest::keyClick(&window, Qt::Key_Return);
+        QCOMPARE(fullState.players[0].hand.size(), handSizeBefore);
+        QCOMPARE(fullState.currentPlayer, currentBefore);
+        QCOMPARE(fullState.lastPlayedCards.size(), lastPlayedBefore);
+        QCOMPARE(handModel->selectedCount(), 5);
+        QCOMPARE(fullState.eventSequence, uint64_t(0));
+
+        QTest::keyClick(&window, Qt::Key_Down, Qt::ControlModifier);
+        QCOMPARE(handModel->selectedCount(), 0);
+        engine.state().setPhase(GamePhase::NotStarted);
+        window.close();
+    }
+
+    void testPhasesWithoutPlayingDoNotTakeCards() {
+        // U13 电脑回合仍可预选补牌；其它阶段键盘不拿牌、不补牌
+        GameEngine engine;
+        preparePlayingHand(engine, sequenceOfHand(Rank::Three, 5, 1));
+        engine.state().fullState().currentPlayer = PlayerId::Player2;
+        AccessibilityService accessibility;
+        MainWindow window(engine, accessibility);
+        window.show();
+        QVERIFY(QTest::qWaitForWindowActive(&window));
+        window.refreshFromState();
+
+        auto* handView = window.findChild<QListView*>();
+        QVERIFY(handView);
+        auto* handModel = qobject_cast<HandListModel*>(handView->model());
+        QVERIFY(handModel);
+
+        QTest::keyClick(&window, Qt::Key_Home);
+        QTest::keyClick(&window, Qt::Key_Up);
+        QTest::keyClick(&window, Qt::Key_End);
+        QTest::keyClick(&window, Qt::Key_Up);
+        QCOMPARE(handModel->selectedCount(), 5);
+
+        for (const auto phase : {GamePhase::Bidding, GamePhase::Paused,
+                                 GamePhase::Finished, GamePhase::NotStarted}) {
+            engine.state().setPhase(phase);
+            QTest::keyClick(&window, Qt::Key_Home);
+            QTest::keyClick(&window, Qt::Key_Up);
+            QCOMPARE(handModel->selectedCount(), 5);
+            QTest::keyClick(&window, Qt::Key_Up, Qt::ControlModifier);
+            QCOMPARE(handModel->selectedCount(), 5);
+        }
+
+        engine.state().setPhase(GamePhase::NotStarted);
+        window.close();
+    }
+
+    void testAutoRepeatKeyDoesNotTakeExtraCards() {
+        // U14 长按自动重复不会额外拿牌
+        GameEngine engine;
+        preparePlayingHand(engine, sequenceOfHand(Rank::Three, 5, 1));
+        AccessibilityService accessibility;
+        MainWindow window(engine, accessibility);
+        window.show();
+        QVERIFY(QTest::qWaitForWindowActive(&window));
+        window.refreshFromState();
+
+        auto* handView = window.findChild<QListView*>();
+        QVERIFY(handView);
+        auto* handModel = qobject_cast<HandListModel*>(handView->model());
+        QVERIFY(handModel);
+
+        QTest::keyClick(&window, Qt::Key_Home);
+        QKeyEvent repeatPress(QEvent::KeyPress, Qt::Key_Up, Qt::NoModifier,
+                              QString(), true);
+        QApplication::sendEvent(&window, &repeatPress);
+        QCOMPARE(handModel->selectedCount(), 0);
+
+        QTest::keyClick(&window, Qt::Key_Up);
+        QCOMPARE(handModel->selectedCount(), 1);
+        QTest::keyClick(&window, Qt::Key_End);
+        QTest::keyClick(&window, Qt::Key_Up);
+        QCOMPARE(handModel->selectedCount(), 5);
+
+        engine.state().setPhase(GamePhase::NotStarted);
+        window.close();
+    }
+
+    void testCustomizedTakeKeysTriggerEndpointCompletion() {
+        // U15 自定义“拿起一张/拿起整组”的键同样触发首尾补牌，旧键按自定义规则失效
+        AppSettings custom;
+        custom.shortcuts.setBinding(ShortcutAction::PickCard, {Qt::Key_PageUp, Qt::NoModifier});
+        custom.shortcuts.setBinding(ShortcutAction::PickRankGroup,
+                                    {Qt::Key_PageUp, Qt::ControlModifier});
+        custom.shortcuts.setBinding(ShortcutAction::FirstRankGroup,
+                                    {Qt::Key_PageDown, Qt::NoModifier});
+        custom.shortcuts.setBinding(ShortcutAction::LastRankGroup,
+                                    {Qt::Key_PageDown, Qt::ControlModifier});
+        custom.normalize();
+        SettingsRepository repository;
+        repository.setData(custom.toJson());
+        DataPaths::ensureDirectories();
+        QVERIFY(repository.save(DataPaths::settingsFile()));
+
+        GameEngine engine;
+        preparePlayingHand(engine, sequenceOfHand(Rank::Three, 5, 1));
+        AccessibilityService accessibility;
+        MainWindow window(engine, accessibility);
+        window.show();
+        QVERIFY(QTest::qWaitForWindowActive(&window));
+        window.refreshFromState();
+
+        auto* handView = window.findChild<QListView*>();
+        QVERIFY(handView);
+        auto* handModel = qobject_cast<HandListModel*>(handView->model());
+        QVERIFY(handModel);
+        auto* statusLabel = window.statusBar()->findChild<QLabel*>();
+        QVERIFY(statusLabel);
+
+        QTest::keyClick(&window, Qt::Key_PageDown);
+        QCOMPARE(handView->currentIndex().row(), 0);
+        QTest::keyClick(&window, Qt::Key_PageUp);
+        QCOMPARE(handModel->selectedCount(), 1);
+        QTest::keyClick(&window, Qt::Key_PageDown, Qt::ControlModifier);
+        QCOMPARE(handView->currentIndex().row(), 4);
+        QTest::keyClick(&window, Qt::Key_PageUp);
+        QCOMPARE(handModel->selectedCount(), 5);
+        QCOMPARE(statusLabel->accessibleName(), QString::fromUtf8(u8"3到7顺子"));
+
+        AppSettings defaults;
+        defaults.normalize();
+        repository.setData(defaults.toJson());
+        QVERIFY(repository.save(DataPaths::settingsFile()));
+
+        engine.state().setPhase(GamePhase::NotStarted);
+        window.close();
+    }
+
+    void testNativeHookMessageCompletesStraight() {
+        // U16 Windows 原生消息分发入口与 Qt 事件结果一致
+#ifdef Q_OS_WIN
+        GameEngine engine;
+        preparePlayingHand(engine, sequenceOfHand(Rank::Three, 5, 1));
+        AccessibilityService accessibility;
+        MainWindow window(engine, accessibility);
+        window.show();
+        QVERIFY(QTest::qWaitForWindowActive(&window));
+        window.refreshFromState();
+
+        auto* handView = window.findChild<QListView*>();
+        QVERIFY(handView);
+        auto* handModel = qobject_cast<HandListModel*>(handView->model());
+        QVERIFY(handModel);
+        auto* statusLabel = window.statusBar()->findChild<QLabel*>();
+        QVERIFY(statusLabel);
+
+        constexpr UINT keyboardHookMessage = WM_APP + 0x4F;
+        const HWND windowHandle = reinterpret_cast<HWND>(window.winId());
+        QVERIFY(PostMessageW(windowHandle, keyboardHookMessage, VK_HOME, 0));
+        QTRY_COMPARE(handView->currentIndex().row(), 0);
+        QVERIFY(PostMessageW(windowHandle, keyboardHookMessage, VK_UP, 0));
+        QTRY_COMPARE(handModel->selectedCount(), 1);
+        QVERIFY(PostMessageW(windowHandle, keyboardHookMessage, VK_END, 0));
+        QTRY_COMPARE(handView->currentIndex().row(), 4);
+        QVERIFY(PostMessageW(windowHandle, keyboardHookMessage, VK_UP, 0));
+        QTRY_COMPARE(handModel->selectedCount(), 5);
+        QTRY_COMPARE(statusLabel->accessibleName(), QString::fromUtf8(u8"3到7顺子"));
+
+        engine.state().setPhase(GamePhase::NotStarted);
+        window.close();
+#else
+        QSKIP("Windows native keyboard hook path only");
+#endif
+    }
+
+    void testRangeAnnouncementKeepsAccessibleChannelClean() {
+        // U18 新范围公告仍走既有公告通道，不引入花色或“选中”噪声
+        GameEngine engine;
+        preparePlayingHand(engine, sequenceOfHand(Rank::Three, 5, 1));
+        AccessibilityService accessibility;
+        MainWindow window(engine, accessibility);
+        window.show();
+        QVERIFY(QTest::qWaitForWindowActive(&window));
+        window.refreshFromState();
+
+        auto* handView = window.findChild<QListView*>();
+        QVERIFY(handView);
+        auto* handModel = qobject_cast<HandListModel*>(handView->model());
+        QVERIFY(handModel);
+        auto* statusLabel = window.statusBar()->findChild<QLabel*>();
+        QVERIFY(statusLabel);
+
+        QTest::keyClick(&window, Qt::Key_Home);
+        QTest::keyClick(&window, Qt::Key_Up);
+        QTest::keyClick(&window, Qt::Key_End);
+        QTest::keyClick(&window, Qt::Key_Up);
+        QCOMPARE(statusLabel->accessibleName(), QString::fromUtf8(u8"3到7顺子"));
+        QVERIFY(!containsForbiddenSpeech(statusLabel->accessibleName()));
+        QCOMPARE(statusLabel->accessibleName().count(QString::fromUtf8(u8"3到7顺子")), 1);
+
+        // 浏览键恢复无障碍文本，且端点仍按单张朗读
+        QTest::keyClick(&window, Qt::Key_Home);
+        QCOMPARE(handModel->data(handModel->index(0, 0), Qt::AccessibleTextRole).toString(),
+                 QStringLiteral("3"));
+        QCOMPARE(handModel->data(handModel->index(4, 0), Qt::AccessibleTextRole).toString(),
+                 QStringLiteral("7"));
+        QVERIFY(!containsForbiddenSpeech(
+            handModel->data(handModel->index(0, 0), Qt::AccessibleTextRole).toString()));
+
+        engine.state().setPhase(GamePhase::NotStarted);
+        window.close();
+    }
+
+    void testLastActionRepeatUsesRangeForSequences() {
+        // U19/U20 上一手复读与最近公告复读使用范围文字，只出现一次
+        GameEngine engine;
+        preparePlayingHand(engine, sequenceOfHand(Rank::Three, 5, 1));
+        auto& fullState = engine.state().fullState();
+        fullState.lastPlayedBy = PlayerId::Player1;
+        fullState.lastPlayedCards = sequenceOfHand(Rank::Three, 5, 1);
+        AccessibilityService accessibility;
+        MainWindow window(engine, accessibility);
+        window.show();
+        QVERIFY(QTest::qWaitForWindowActive(&window));
+        auto* statusLabel = window.statusBar()->findChild<QLabel*>();
+        QVERIFY(statusLabel);
+
+        QTest::keyClick(&window, Qt::Key_F12);
+        QCOMPARE(statusLabel->text(), QString::fromUtf8(u8"地主，3到7顺子"));
+        QCOMPARE(statusLabel->text().count(QString::fromUtf8(u8"3到7顺子")), 1);
+
+        fullState.lastPlayedCards = sequenceOfHand(Rank::Four, 3, 2);
+        QTest::keyClick(&window, Qt::Key_F12);
+        QCOMPARE(statusLabel->text(), QString::fromUtf8(u8"地主，4到6连对"));
+
+        fullState.lastPlayedCards = sequenceOfHand(Rank::Three, 4, 3);
+        QTest::keyClick(&window, Qt::Key_F12);
+        QCOMPARE(statusLabel->text(), QString::fromUtf8(u8"地主，3到6飞机"));
+
+        fullState.lastPlayedBy = PlayerId::Player2;
+        QTest::keyClick(&window, Qt::Key_F12);
+        QVERIFY(!statusLabel->text().startsWith(QString::fromUtf8(u8"地主，")));
+        QVERIFY(statusLabel->text().endsWith(QString::fromUtf8(u8"3到6飞机")));
+
+        engine.state().setPhase(GamePhase::NotStarted);
+        window.close();
+    }
+
+    void testHintAndNewGameDoNotTriggerCompletion() {
+        // U22 提示、刷新与新局都不会意外补牌
+        GameEngine engine;
+        preparePlayingHand(engine, sequenceOfHand(Rank::Three, 5, 1));
+        AccessibilityService accessibility;
+        MainWindow window(engine, accessibility);
+        window.show();
+        QVERIFY(QTest::qWaitForWindowActive(&window));
+        window.refreshFromState();
+
+        auto* handView = window.findChild<QListView*>();
+        QVERIFY(handView);
+        auto* handModel = qobject_cast<HandListModel*>(handView->model());
+        QVERIFY(handModel);
+        auto* statusLabel = window.statusBar()->findChild<QLabel*>();
+        QVERIFY(statusLabel);
+
+        QTest::keyClick(&window, Qt::Key_Home);
+        QTest::keyClick(&window, Qt::Key_Up);
+        QTest::keyClick(&window, Qt::Key_End);
+        QTest::keyClick(&window, Qt::Key_Up);
+        QCOMPARE(handModel->selectedCount(), 5);
+        QTest::keyClick(&window, Qt::Key_Down);
+        QCOMPARE(handModel->selectedCount(), 4);
+        window.refreshFromState();
+        QCOMPARE(handModel->selectedCount(), 4);
+        QVERIFY(!handModel->isSelected(4));
+
+        QPushButton* hintButton = nullptr;
+        for (auto* button : window.findChildren<QPushButton*>()) {
+            if (button->accessibleName() == QString::fromUtf8(u8"出牌提示")) {
+                hintButton = button;
+                break;
+            }
+        }
+        QVERIFY(hintButton);
+        QVERIFY(hintButton->isEnabled());
+        hintButton->click();
+        const auto match = QRegularExpression(QString::fromUtf8(u8"共(\\d+)张"))
+                               .match(statusLabel->text());
+        QVERIFY(match.hasMatch());
+        QCOMPARE(handModel->selectedCount(), match.captured(1).toInt());
+
+        engine.state().setPhase(GamePhase::NotStarted);
+        window.startNewGame();
+        QVERIFY(handModel->rowCount() > 0);
+        QCOMPARE(handModel->selectedCount(), 0);
+
+        engine.state().setPhase(GamePhase::NotStarted);
+        window.close();
+    }
+
+    void testManualTripleGroupsAnnounceAirplaneRange() {
+        // U23 逐组手工拿齐三张组：333444 报 3到4飞机，拿齐到 6 才报 3到6飞机
+        GameEngine engine;
+        preparePlayingHand(engine, sequenceOfHand(Rank::Three, 4, 3));
+        AccessibilityService accessibility;
+        MainWindow window(engine, accessibility);
+        window.show();
+        QVERIFY(QTest::qWaitForWindowActive(&window));
+        window.refreshFromState();
+
+        auto* handView = window.findChild<QListView*>();
+        QVERIFY(handView);
+        auto* handModel = qobject_cast<HandListModel*>(handView->model());
+        QVERIFY(handModel);
+        QCOMPARE(handModel->rowCount(), 12);
+        auto* statusLabel = window.statusBar()->findChild<QLabel*>();
+        QVERIFY(statusLabel);
+
+        QTest::keyClick(&window, Qt::Key_Home);
+        QTest::keyClick(&window, Qt::Key_Up, Qt::ControlModifier);
+        QCOMPARE(handModel->selectedCount(), 3);
+        QCOMPARE(statusLabel->accessibleName(), QString::fromUtf8(u8"3张3"));
+        QTest::keyClick(&window, Qt::Key_Up, Qt::ControlModifier);
+        QCOMPARE(handModel->selectedCount(), 6);
+        QCOMPARE(statusLabel->accessibleName(), QString::fromUtf8(u8"3到4飞机"));
+        QTest::keyClick(&window, Qt::Key_Up, Qt::ControlModifier);
+        QCOMPARE(handModel->selectedCount(), 9);
+        QCOMPARE(statusLabel->accessibleName(), QString::fromUtf8(u8"3到5飞机"));
+        QTest::keyClick(&window, Qt::Key_Up, Qt::ControlModifier);
+        QCOMPARE(handModel->selectedCount(), 12);
+        QCOMPARE(statusLabel->accessibleName(), QString::fromUtf8(u8"3到6飞机"));
+        QTest::keyClick(&window, Qt::Key_Down, Qt::ControlModifier);
+        QCOMPARE(handModel->selectedCount(), 0);
+        QCOMPARE(statusLabel->accessibleName(), QString::fromUtf8(u8"3到6飞机"));
+
+        engine.state().setPhase(GamePhase::NotStarted);
+        window.close();
+    }
+
+    void testTripleEndpointsDoNotAutoCompleteMiddleTriples() {
+        // U23 续：首尾各三张不会自动补中间三张组
+        GameEngine engine;
+        preparePlayingHand(engine, sequenceOfHand(Rank::Three, 4, 3));
+        AccessibilityService accessibility;
+        MainWindow window(engine, accessibility);
+        window.show();
+        QVERIFY(QTest::qWaitForWindowActive(&window));
+        window.refreshFromState();
+
+        auto* handView = window.findChild<QListView*>();
+        QVERIFY(handView);
+        auto* handModel = qobject_cast<HandListModel*>(handView->model());
+        QVERIFY(handModel);
+        auto* statusLabel = window.statusBar()->findChild<QLabel*>();
+        QVERIFY(statusLabel);
+
+        QTest::keyClick(&window, Qt::Key_Home);
+        QTest::keyClick(&window, Qt::Key_Up, Qt::ControlModifier);
+        QCOMPARE(handModel->selectedCount(), 3);
+        QTest::keyClick(&window, Qt::Key_End);
+        QCOMPARE(handView->currentIndex().row(), 9);
+        QTest::keyClick(&window, Qt::Key_Up, Qt::ControlModifier);
+        QCOMPARE(handModel->selectedCount(), 6);
+        QCOMPARE(statusLabel->accessibleName(), QString::fromUtf8(u8"3张6"));
+        for (int row = 3; row < 9; ++row) QVERIFY(!handModel->isSelected(row));
+
+        engine.state().setPhase(GamePhase::NotStarted);
+        window.close();
+    }
+
+    void testSequenceSoundPlanKeepsEndpointWaveFiles() {
+        // U21/U24 出牌音效仍使用首尾 WAV 计划，纯飞机仍是 linkThree.wav
+        const auto airplane = sequenceOfHand(Rank::Three, 4, 3);
+        GameEvent event;
+        event.type = GameEventType::CardsPlayed;
+        event.playerId = PlayerId::Player1;
+        event.cards = airplane;
+        event.pattern = PatternAnalyzer::analyze(airplane, PLAYER_COUNT);
+        QCOMPARE(event.pattern.type, CardPatternType::Airplane);
+        const auto airplanePlan = buildCardPatternSoundPlan(event);
+        QStringList expectedAirplane;
+        expectedAirplane << QStringLiteral("card_four/boy/3.wav")
+                         << QStringLiteral("card_four/boy/zhi.wav")
+                         << QStringLiteral("card_four/boy/6.wav")
+                         << QStringLiteral("card_four/boy/linkThree.wav");
+        QCOMPARE(asQStringList(airplanePlan.voiceFiles), expectedAirplane);
+        QVERIFY(airplanePlan.effectFile.empty());
+
+        const auto straight = sequenceOfHand(Rank::Three, 5, 1);
+        event.cards = straight;
+        event.pattern = PatternAnalyzer::analyze(straight, PLAYER_COUNT);
+        QCOMPARE(event.pattern.type, CardPatternType::Straight);
+        const auto straightPlan = buildCardPatternSoundPlan(event);
+        QStringList expectedStraight;
+        expectedStraight << QStringLiteral("card_four/boy/3.wav")
+                         << QStringLiteral("card_four/boy/zhi.wav")
+                         << QStringLiteral("card_four/boy/7.wav")
+                         << QStringLiteral("card_four/boy/line.wav");
+        QCOMPARE(asQStringList(straightPlan.voiceFiles), expectedStraight);
+        QCOMPARE(QString::fromStdString(straightPlan.effectFile),
+                 QStringLiteral("card_four/shunzi.wav"));
+
+        const auto femalePlan = buildCardPatternSoundPlan(event, true);
+        QVERIFY(!femalePlan.voiceFiles.empty());
+        QCOMPARE(QString::fromStdString(femalePlan.voiceFiles.front()),
+                 QStringLiteral("card_four/girl/3.wav"));
+
+        QStringList requiredFiles = expectedAirplane;
+        requiredFiles << QStringLiteral("card_four/shunzi.wav")
+                      << QStringLiteral("card_four/girl/3.wav")
+                      << QStringLiteral("card_four/girl/6.wav")
+                      << QStringLiteral("card_four/girl/zhi.wav")
+                      << QStringLiteral("card_four/girl/linkThree.wav");
+        for (const QString& file : requiredFiles) {
+            const QString path = QDir(QCoreApplication::applicationDirPath())
+                .filePath(QStringLiteral("resources/sounds/") + file);
+            QString error;
+            QVERIFY2(SoundService::validateWaveFile(path, &error),
+                     qPrintable(path + error));
+        }
+    }
+
 private:
+    static std::vector<Card> sameRankCards(Rank rank, int count) {
+
+        const Suit suits[] = {Suit::Spades, Suit::Hearts, Suit::Clubs, Suit::Diamonds};
+        std::vector<Card> cards;
+        for (int index = 0; index < count; ++index) {
+            const bool joker = rank == Rank::SmallJoker || rank == Rank::BigJoker;
+            cards.push_back(Card::create(rank,
+                joker ? Suit::None : suits[index % 4],
+                static_cast<DeckIndex>(joker ? 0 : index / 4)));
+        }
+        return cards;
+    }
+
+    static std::vector<Card> handOfCounts(const std::vector<std::pair<Rank, int>>& groups) {
+        std::vector<Card> cards;
+        for (const auto& group : groups) {
+            const auto part = sameRankCards(group.first, group.second);
+            cards.insert(cards.end(), part.begin(), part.end());
+        }
+        return cards;
+    }
+
+    static std::vector<Card> sequenceOfHand(Rank start, int length, int copies) {
+        std::vector<Card> cards;
+        for (int offset = 0; offset < length; ++offset) {
+            const auto part = sameRankCards(
+                static_cast<Rank>(static_cast<int>(start) + offset), copies);
+            cards.insert(cards.end(), part.begin(), part.end());
+        }
+        return cards;
+    }
+
+    static QStringList asQStringList(const std::vector<std::string>& files) {
+        QStringList result;
+        for (const auto& file : files) result.push_back(QString::fromStdString(file));
+        return result;
+    }
+
+    static void preparePlayingHand(GameEngine& engine, const std::vector<Card>& cards) {
+        auto& state = engine.state();
+        auto& fullState = state.fullState();
+        state.setPhase(GamePhase::Playing);
+        fullState.currentPlayer = PlayerId::Player1;
+        fullState.lastPlayedCards.clear();
+        fullState.consecutivePasses = 0;
+        fullState.players[0].role = Role::Landlord;
+        for (size_t index = 1; index < fullState.players.size(); ++index) {
+            fullState.players[index].role = Role::Farmer;
+        }
+        fullState.players[0].hand.clear();
+        fullState.players[0].hand.addCards(cards);
+        fullState.players[0].hand.sortByRank();
+    }
+
+    static int traceCount(DiagnosticTraceService& trace, const QString& type) {
+        trace.flush();
+        QFile file(trace.traceFilePath());
+        if (!file.open(QIODevice::ReadOnly)) return -1;
+        int count = 0;
+        while (!file.atEnd()) {
+            const auto document = QJsonDocument::fromJson(file.readLine());
+            if (!document.isObject()) continue;
+            if (document.object().value(QStringLiteral("type")).toString() == type) ++count;
+        }
+        return count;
+    }
+
     static void writeCustomPlayerNames() {
+
         DataPaths::ensureDirectories();
         AppSettings settings;
         settings.playerNames[0] = QString::fromUtf8(u8"东风");

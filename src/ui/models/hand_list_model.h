@@ -1,6 +1,7 @@
 ﻿#pragma once
 #include <QAbstractListModel>
 #include "../../core/model/card.h"
+#include "../../core/rules/card_pattern.h"
 #include <optional>
 #include <vector>
 namespace fpdz {
@@ -44,6 +45,9 @@ public:
     int lastBrowsableGroupStartRow() const;
     void setGroupSelected(int row, bool selected);
     GroupSelectionResult selectGroup(int row);
+    // 首尾选牌辅助：全部校验通过后才补充中间点数，失败时不改变任何选择。
+    std::optional<CardPattern> completeEndpointSelection(
+        int activePlayerCount, bool allowStraight);
 private:
     std::vector<Card> m_cards;
     std::vector<bool> m_selected;

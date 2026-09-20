@@ -66,6 +66,29 @@ std::wstring formatSequence(const CardPattern& pattern, const wchar_t* name) {
     return text;
 }
 
+std::wstring formatSequenceEndpoints(const CardPattern& pattern, const wchar_t* name) {
+    int minimumLength = 0;
+    switch (pattern.type) {
+    case CardPatternType::Straight:         minimumLength = 5; break;
+    case CardPatternType::ConsecutivePairs: minimumLength = 3; break;
+    case CardPatternType::Airplane:         minimumLength = 2; break;
+    default:                                return formatSequence(pattern, name);
+    }
+    const int start = rankWeight(pattern.mainRank);
+    if (pattern.mainLength < minimumLength || pattern.mainLength > 12) {
+        return formatSequence(pattern, name);
+    }
+    if (start < static_cast<int>(Rank::Three) || start > static_cast<int>(Rank::Ace)) {
+        return formatSequence(pattern, name);
+    }
+    const int end = start + pattern.mainLength - 1;
+    if (end > static_cast<int>(Rank::Ace)) {
+        return formatSequence(pattern, name);
+    }
+    return CardTextFormatter::formatRankSpeech(pattern.mainRank) + L"到" +
+           CardTextFormatter::formatRankSpeech(static_cast<Rank>(end)) + name;
+}
+
 std::wstring formatPairWings(const CardPattern& pattern,
                              const std::vector<Card>& cards,
                              int bodyCopies) {
@@ -133,11 +156,11 @@ std::wstring CardTextFormatter::formatPlayedCards(
                (wings.empty() ? std::wstring{} : L"，带" + wings);
     }
     case CardPatternType::Straight:
-        return formatSequence(pattern, L"顺子");
+        return formatSequenceEndpoints(pattern, L"顺子");
     case CardPatternType::ConsecutivePairs:
-        return formatSequence(pattern, L"连对");
+        return formatSequenceEndpoints(pattern, L"连对");
     case CardPatternType::Airplane:
-        return formatSequence(pattern, L"飞机");
+        return formatSequenceEndpoints(pattern, L"飞机");
     case CardPatternType::AirplaneWithPairs: {
         const auto wings = formatPairWings(pattern, cards, 3);
         return formatSequence(pattern, L"飞机") +

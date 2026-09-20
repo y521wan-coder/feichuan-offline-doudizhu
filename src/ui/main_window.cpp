@@ -21,6 +21,7 @@
 #include "../core/text/card_text_formatter.h"
 #include "../core/text/game_text_formatter.h"
 #include "../core/audio/card_pattern_sound_plan.h"
+#include "../core/rules/pattern_analyzer.h"
 #include "../core/model/player.h"
 #include "sound_service.h"
 #include <persistence/diagnostic_trace_service.h>
@@ -110,6 +111,23 @@ std::wstring formatCardSelection(const std::vector<Card>& cards) {
         text += formatCardSelectionGroup(rank, count);
     }
     return text;
+}
+
+// 只读判断：当前选中的全部牌是否恰好构成可以用首尾表达的牌型。
+std::optional<std::wstring> conciseSelectedSequenceText(
+        const std::vector<Card>& cards, int activePlayerCount) {
+    if (cards.empty()) return std::nullopt;
+    const CardPattern pattern = PatternAnalyzer::analyze(cards, activePlayerCount);
+    switch (pattern.type) {
+    case CardPatternType::Straight:
+    case CardPatternType::ConsecutivePairs:
+    case CardPatternType::Airplane:
+        break;
+    default:
+        return std::nullopt;
+    }
+    if (!pattern.isValid()) return std::nullopt;
+    return CardTextFormatter::formatPlayedCards(pattern, cards);
 }
 
 QString redactedPath(QString path) {
@@ -3106,6 +3124,10 @@ void MainWindow::takeCurrentCard() {
         selected = m_handModel->selectSingle(row);
         playSound(SoundId::CardSelect);
     }
+    if (selected) {
+        m_handModel->completeEndpointSelection(
+            m_engine.publicSnapshot().activePlayerCount, true);
+    }
 
     const auto card = m_handModel->cardAt(row);
     const auto targetIndex = m_handModel->index(row, 0);
@@ -3117,7 +3139,12 @@ void MainWindow::takeCurrentCard() {
     m_handView->scrollTo(targetIndex, QAbstractItemView::EnsureVisible);
     m_handView->viewport()->update();
     if (selected) {
-        announce(CardTextFormatter::formatRankSpeech(card.rank()),
+        const auto conciseText = conciseSelectedSequenceText(
+            m_handModel->selectedCards(),
+            m_engine.publicSnapshot().activePlayerCount);
+        announce(conciseText.has_value()
+                     ? *conciseText
+                     : CardTextFormatter::formatRankSpeech(card.rank()),
                  AnnouncementCategory::CardSelection,
                  AnnouncementPriority::Normal, false);
     }
@@ -3167,8 +3194,16 @@ void MainWindow::takeCurrentGroup() {
         traceHandAction(QStringLiteral("take_group"), traceBefore, details);
         return;
     }
+    // 整组入口不凭单张首尾补顺子，但仍允许各两张的首尾补连对。
+    m_handModel->completeEndpointSelection(
+        m_engine.publicSnapshot().activePlayerCount, false);
     playSound(SoundId::CardSelect);
-    announce(formatCardSelectionGroup(result.rank, result.groupCount),
+    const auto conciseGroupText = conciseSelectedSequenceText(
+        m_handModel->selectedCards(),
+        m_engine.publicSnapshot().activePlayerCount);
+    announce(conciseGroupText.has_value()
+                 ? *conciseGroupText
+                 : formatCardSelectionGroup(result.rank, result.groupCount),
              AnnouncementCategory::CardSelection,
              AnnouncementPriority::Normal, false);
     QJsonObject details;
@@ -3219,7 +3254,11 @@ void MainWindow::putDownAllCards() {
     m_handModel->clearSelection();
     if (selectedCount > 0) {
         playSound(SoundId::CardDeselect);
-        announce(formatCardSelection(selectedCards), AnnouncementCategory::CardSelection,
+        const auto concisePutDownText = conciseSelectedSequenceText(
+            selectedCards, m_engine.publicSnapshot().activePlayerCount);
+        announce(concisePutDownText.has_value() ? *concisePutDownText
+                                                : formatCardSelection(selectedCards),
+                 AnnouncementCategory::CardSelection,
                  AnnouncementPriority::Normal, false);
     }
     QJsonObject details;
