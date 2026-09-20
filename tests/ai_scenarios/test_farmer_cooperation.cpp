@@ -1,6 +1,10 @@
 #include <QtTest>
 
+#include <algorithm>
+#include <array>
+
 #include "ai/standard_ai.h"
+#include "core/model/deck.h"
 
 using namespace fpdz;
 
@@ -135,6 +139,56 @@ private slots:
         QCOMPARE(first.type, second.type);
         QCOMPARE(first.cardIds, second.cardIds);
         QCOMPARE(first.aiDecisionReason, second.aiDecisionReason);
+    }
+
+    void strategicallyPassesForNextFarmerToFinish() {
+        AiObservation observation;
+        observation.playerId = PlayerId::Player2;
+        observation.phase = GamePhase::Playing;
+        observation.decisionSeed = 770031;
+        observation.publicState.activePlayerCount = THREE_PLAYER_COUNT;
+        observation.publicState.currentPlayer = PlayerId::Player2;
+
+        const Card ownFour = Card::create(Rank::Four, Suit::Spades, 0);
+        const Card ownFive = Card::create(Rank::Five, Suit::Spades, 0);
+        observation.ownHand.addCards({ownFour, ownFive});
+
+        for (int index = 0; index < THREE_PLAYER_COUNT; ++index) {
+            auto& player = observation.publicState.players[index];
+            player.id = static_cast<PlayerId>(index);
+            player.role = index == 0 ? Role::Landlord : Role::Farmer;
+            player.roleRevealed = true;
+        }
+        observation.publicState.players[0].remainingCards = 2;
+        observation.publicState.players[1].remainingCards = 2;
+        observation.publicState.players[2].remainingCards = 1;
+
+        const Card lastThree = Card::create(Rank::Three, Suit::Spades, 0);
+        observation.publicState.lastPlayedCards = {lastThree};
+        observation.publicState.lastPlayedBy = PlayerId::Player1;
+        observation.publicState.lastPlayedValid = true;
+
+        const std::array<CardId, 5> cardsStillHeld{
+            ownFour.id(), ownFive.id(),
+            Card::create(Rank::Six, Suit::Spades, 0).id(),
+            Card::create(Rank::Seven, Suit::Spades, 0).id(),
+            Card::create(Rank::Eight, Suit::Spades, 0).id(),
+        };
+        PublicActionRecord publicHistory;
+        publicHistory.type = PublicActionType::Play;
+        for (const auto& card : Deck::createForPlayerCount(THREE_PLAYER_COUNT)) {
+            if (std::find(cardsStillHeld.begin(), cardsStillHeld.end(), card.id()) ==
+                cardsStillHeld.end()) {
+                publicHistory.cards.push_back(card);
+            }
+        }
+        observation.publicState.actionHistory.push_back(std::move(publicHistory));
+
+        StandardAiPlayer ai(AiDifficulty::Advanced);
+        const auto command = ai.decidePlay(observation);
+        QCOMPARE(command.type, GameCommandType::Pass);
+        QCOMPARE(command.aiDecisionReason,
+                 std::string("strategic_pass_for_teammate_finish"));
     }
 };
 

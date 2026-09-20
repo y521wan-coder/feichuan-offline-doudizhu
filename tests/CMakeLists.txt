@@ -135,6 +135,11 @@ fpdz_add_test(test_farmer_cooperation
     SOURCES ai_scenarios/test_farmer_cooperation.cpp
     LIBS fpdz_core fpdz_ai
 )
+fpdz_add_test(test_ai_strength
+    NO_DEFAULT_TEST
+    SOURCES ai/test_ai_strength.cpp
+    LIBS fpdz_core fpdz_ai
+)
 set_tests_properties(test_ai PROPERTIES
     TIMEOUT 900
     ENVIRONMENT "QTEST_FUNCTION_TIMEOUT=900000"

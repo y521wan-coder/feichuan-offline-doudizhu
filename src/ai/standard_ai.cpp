@@ -2,6 +2,7 @@
 
 #include "bidding_strategy.h"
 #include "farmer_team_strategy.h"
+#include "imperfect_information_search.h"
 #include "landlord_strategy.h"
 #include "strategic_search_evaluator.h"
 #include "../core/rules/pattern_analyzer.h"
@@ -123,6 +124,7 @@ GameCommand StandardAiPlayer::decidePlay(const AiObservation& observation) {
     struct ScoredMove {
         std::size_t index = 0;
         int score = std::numeric_limits<int>::min();
+        std::optional<int> publicSearchScore;
     };
     std::vector<ScoredMove> scoredMoves;
     scoredMoves.reserve(candidateIndexes.size());
@@ -199,6 +201,30 @@ GameCommand StandardAiPlayer::decidePlay(const AiObservation& observation) {
         scoredMoves[position].score += strategicSearch.refinedHandPlanBonus(remaining);
     }
     scoredMoves.resize(planningLimit);
+
+    // In tactically relevant positions, compare the best shape candidates by
+    // actually rotating the table through public-information deal samples.
+    // This is deliberately downstream of the shared farmer safety filter.
+    std::sort(scoredMoves.begin(), scoredMoves.end(),
+        [](const ScoredMove& left, const ScoredMove& right) {
+            if (left.score != right.score) return left.score > right.score;
+            return left.index < right.index;
+        });
+    ImperfectInformationSearch publicSearch(observation, m_profile);
+    if (publicSearch.active()) {
+        const int rolloutLimit = std::min(
+            static_cast<int>(scoredMoves.size()),
+            m_profile.level == AiDifficulty::Advanced ? 4 : 2);
+        for (int position = 0; position < rolloutLimit; ++position) {
+            auto& scored = scoredMoves[position];
+            scored.publicSearchScore = publicSearch.scoreMove(moves[scored.index]);
+            if (scored.publicSearchScore.has_value()) {
+                scored.score += *scored.publicSearchScore / 2;
+            }
+        }
+        scoredMoves.resize(rolloutLimit);
+    }
+
     const int bestScore = std::max_element(
         scoredMoves.begin(), scoredMoves.end(),
         [](const ScoredMove& left, const ScoredMove& right) {
@@ -222,6 +248,35 @@ GameCommand StandardAiPlayer::decidePlay(const AiObservation& observation) {
         if (useRandomSafeChoice(random)) {
             std::uniform_int_distribution<std::size_t> choose(0, safeNearBest.size() - 1);
             selected = safeNearBest[choose(random)];
+        }
+    }
+
+    // A farmer may deliberately let the next farmer answer the landlord when
+    // public card counts and sampled continuations show a materially safer team
+    // result. This is not used to overtake a teammate and does not weaken the
+    // existing mandatory one-card-landlord interception rule.
+    if (!isLeader && ownRole == Role::Farmer && lastRole == Role::Landlord &&
+        publicSearch.active()) {
+        const int ownIndex = static_cast<int>(observation.playerId);
+        const int nextIndex = (ownIndex + 1) % observation.publicState.activePlayerCount;
+        const auto& nextPlayer = observation.publicState.players[nextIndex];
+        const int landlordCards = observation.publicState.players[
+            static_cast<int>(observation.publicState.lastPlayedBy)].remainingCards;
+        if (nextPlayer.role == Role::Farmer && nextPlayer.remainingCards <= 2 &&
+            landlordCards > 1) {
+            const auto passScore = publicSearch.scorePass();
+            const bool forcedTeammateFinish = passScore.has_value() &&
+                selected->publicSearchScore.has_value() && *passScore >= 11000 &&
+                *passScore >= *selected->publicSearchScore;
+            const bool materiallySaferPass = passScore.has_value() &&
+                selected->publicSearchScore.has_value() &&
+                *passScore > *selected->publicSearchScore +
+                    (m_profile.level == AiDifficulty::Advanced ? 150 : 350);
+            if (forcedTeammateFinish || materiallySaferPass) {
+                command.type = GameCommandType::Pass;
+                command.aiDecisionReason = "strategic_pass_for_teammate_finish";
+                return command;
+            }
         }
     }
 
