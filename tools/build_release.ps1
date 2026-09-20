@@ -12,6 +12,8 @@ $gameFileName = $gameName + '.exe'
 $updaterFileName = $updaterName + '.exe'
 $releaseExe = Join-Path $root (Join-Path 'build\release-x64' $gameFileName)
 $updaterExe = Join-Path $root (Join-Path 'build\release-x64' $updaterFileName)
+$nvdaControllerDll = Join-Path $root 'build\release-x64\nvdaControllerClient.dll'
+$nvdaControllerLicense = Join-Path $root 'build\release-x64\licenses\NVDA-Controller-Client-LGPL-2.1.txt'
 $portable = Join-Path $root 'artifacts\portable-current'
 $versionFile = Join-Path $root 'version.txt'
 $dist = Join-Path $root 'releases'
@@ -41,6 +43,8 @@ if ($Deploy) {
     if ($running) { throw 'Close the game before generating the portable package.' }
     if (-not (Test-Path -LiteralPath $releaseExe)) { throw "Missing release executable: $releaseExe" }
     if (-not (Test-Path -LiteralPath $updaterExe)) { throw "Missing updater executable: $updaterExe" }
+    if (-not (Test-Path -LiteralPath $nvdaControllerDll)) { throw "Missing NVDA Controller Client: $nvdaControllerDll" }
+    if (-not (Test-Path -LiteralPath $nvdaControllerLicense)) { throw "Missing NVDA Controller Client license: $nvdaControllerLicense" }
 
     $resolvedArtifacts = [IO.Path]::GetFullPath((Join-Path $root 'artifacts'))
     $resolvedPortable = [IO.Path]::GetFullPath($portable)
@@ -54,6 +58,9 @@ if ($Deploy) {
     New-Item -ItemType Directory -Path $resolvedPortable -Force | Out-Null
     Copy-Item -LiteralPath $releaseExe -Destination $resolvedPortable -Force
     Copy-Item -LiteralPath $updaterExe -Destination $resolvedPortable -Force
+    Copy-Item -LiteralPath $nvdaControllerDll -Destination $resolvedPortable -Force
+    New-Item -ItemType Directory -Path (Join-Path $resolvedPortable 'licenses') -Force | Out-Null
+    Copy-Item -LiteralPath $nvdaControllerLicense -Destination (Join-Path $resolvedPortable 'licenses') -Force
     Copy-Item -LiteralPath (Join-Path $root 'README.md') -Destination $resolvedPortable -Force
     Copy-Item -LiteralPath (Join-Path $root 'docs') -Destination $resolvedPortable -Recurse -Force
     New-Item -ItemType Directory -Path (Join-Path $resolvedPortable 'resources') -Force | Out-Null
@@ -82,6 +89,9 @@ if ($Package) {
     New-Item -ItemType Directory -Path $resolvedStage -Force | Out-Null
     Copy-Item -LiteralPath $releaseExe -Destination $resolvedStage -Force
     Copy-Item -LiteralPath $updaterExe -Destination $resolvedStage -Force
+    Copy-Item -LiteralPath $nvdaControllerDll -Destination $resolvedStage -Force
+    New-Item -ItemType Directory -Path (Join-Path $resolvedStage 'licenses') -Force | Out-Null
+    Copy-Item -LiteralPath $nvdaControllerLicense -Destination (Join-Path $resolvedStage 'licenses') -Force
     Copy-Item -LiteralPath (Join-Path $root 'README.md') -Destination $resolvedStage -Force
     New-Item -ItemType Directory -Path (Join-Path $resolvedStage 'docs') -Force | Out-Null
     Copy-Item -Path (Join-Path $root 'assets\docs\*.txt') -Destination (Join-Path $resolvedStage 'docs') -Force

@@ -92,6 +92,7 @@ add_library(fpdz_accessibility STATIC
     src/accessibility/accessibility_service.cpp
     src/accessibility/announcement_scheduler.cpp
     src/accessibility/accessibility_text.cpp
+    src/accessibility/screen_reader_bridge.cpp
 )
 target_include_directories(fpdz_accessibility PUBLIC "${CMAKE_SOURCE_DIR}/src")
 target_link_libraries(fpdz_accessibility PUBLIC fpdz_core PRIVATE Qt6::Core Qt6::Widgets)
@@ -184,10 +185,16 @@ add_custom_command(TARGET FeichuanOfflineDoudizhu POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
         "${CMAKE_SOURCE_DIR}/assets/sounds"
         "$<TARGET_FILE_DIR:FeichuanOfflineDoudizhu>/resources/sounds"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_SOURCE_DIR}/third_party/nvda_controller/nvdaControllerClient.dll"
+        "$<TARGET_FILE_DIR:FeichuanOfflineDoudizhu>/nvdaControllerClient.dll"
+    COMMAND ${CMAKE_COMMAND} -E make_directory
+        "$<TARGET_FILE_DIR:FeichuanOfflineDoudizhu>/licenses"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_SOURCE_DIR}/third_party/nvda_controller/LICENSE-LGPL-2.1.txt"
+        "$<TARGET_FILE_DIR:FeichuanOfflineDoudizhu>/licenses/NVDA-Controller-Client-LGPL-2.1.txt"
     COMMAND ${CMAKE_COMMAND} -E rm -f
         "$<TARGET_FILE_DIR:FeichuanOfflineDoudizhu>/nvdaControllerClient64.dll"
-    COMMAND ${CMAKE_COMMAND} -E rm -f
-        "$<TARGET_FILE_DIR:FeichuanOfflineDoudizhu>/licenses/NVDA-Controller-Client-LGPL-2.1.txt"
     COMMAND ${CMAKE_COMMAND} -E rm -f
         "$<TARGET_FILE_DIR:FeichuanOfflineDoudizhu>/Qt6Sql.dll"
         "$<TARGET_FILE_DIR:FeichuanOfflineDoudizhu>/Qt6Concurrent.dll"

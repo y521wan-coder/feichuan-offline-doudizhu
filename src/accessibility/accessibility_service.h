@@ -1,6 +1,7 @@
 ﻿#pragma once
 #include "announcement.h"
 #include "announcement_scheduler.h"
+#include "screen_reader_bridge.h"
 #include <QElapsedTimer>
 #include <string>
 class QObject;
@@ -17,6 +18,7 @@ public:
     std::wstring backendName() const;
 private:
     AnnouncementScheduler m_scheduler;
+    ScreenReaderBridge m_screenReaderBridge;
     QElapsedTimer m_lastAnnouncementTimer;
     std::wstring m_lastAnnouncementText;
     AnnouncementCategory m_lastAnnouncementCategory = AnnouncementCategory::System;

@@ -3742,8 +3742,8 @@ void MainWindow::updateBackgroundMusic() {
 void MainWindow::announce(const std::wstring& text, AnnouncementCategory category,
                           AnnouncementPriority priority, bool updateStatus) {
     m_lastSpeechDeliveryTime = QDateTime::currentDateTime().toString(Qt::ISODateWithMs);
-    m_lastSpeechDeliveryChannel = QStringLiteral("qt_focus_event");
-    m_lastSpeechDeliveryResult = QStringLiteral("传统Qt/UIA焦点事件未提交");
+    m_lastSpeechDeliveryChannel = QStringLiteral("screen_reader_router");
+    m_lastSpeechDeliveryResult = QStringLiteral("读屏路由尚未提交");
     if (m_statusLabel && !text.empty()) {
         const QString qText = QString::fromStdWString(text);
         if (updateStatus) {
@@ -3757,8 +3757,8 @@ void MainWindow::announce(const std::wstring& text, AnnouncementCategory categor
     ann.priority = priority;
     const bool submitted = m_accessibility.announce(ann, m_statusLabel);
     m_lastSpeechDeliveryResult = submitted
-        ? QStringLiteral("传统Qt/UIA焦点事件已提交，实际朗读由读屏软件决定")
-        : QStringLiteral("传统Qt/UIA焦点事件已去重或目标不可用");
+        ? QStringLiteral("已提交到当前读屏官方接口或Qt/UIA兜底")
+        : QStringLiteral("朗读已去重或目标不可用");
     if (m_diagnosticTrace) {
         m_diagnosticTrace->record(QJsonObject{
             {QStringLiteral("type"), QStringLiteral("speech_delivery")},

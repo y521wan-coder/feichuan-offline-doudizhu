@@ -3,6 +3,20 @@
 项目：D:\飞船单机斗地主
 仓库：https://github.com/y521wan-coder/feichuan-offline-doudizhu
 
+【本轮正式发布 1.4】2026-09-20
+
+- 本轮按用户指示完成三件事：发布更新服务器、更新开源仓库、更新本交接说明。产品侧本轮正式纳入读屏官方接口修复，并把 `version.txt` 由 1.3 升到 1.4。
+- 修复现象：近期版本只发送 Qt/UIA 传统焦点事件，争渡兼容而保益、NVDA 在当前安装版本下不接管，导致直接使用保益或 NVDA 时游戏无声；运行中切换读屏后也因标准后端仍绑定旧会话而无声。
+- 修复实现：新增单一读屏路由，每次公告按当前运行读屏进程选择 NVDA Controller Client、保益 `byctrl-x64.dll`、争渡 `ZDSRAPI_x64.dll` 中的一种，官方接口失败才使用 Qt/UIA 焦点事件。检测到读屏主进程会话变化且新读屏私有接口不可用时，只在切换边界重置一次 Qt 无障碍后端，平时不重置、不重复朗读，游戏无需重启。
+- NVDA 使用官方 2026.1.1 x64 `nvdaControllerClient.dll`（SHA-256 `2FE60CF00BE929AAE32E95C1E1507A20ADA4902C8FEC273B3CC2D3BF5472932A`），随程序和安装包分发，LGPL 2.1 许可证随附；保益、争渡从各自官方安装目录加载 64 位 DLL，不复制或修改读屏文件，用户不需要另装接口组件。
+- `tools\build_release.ps1 -Package`：全量 Configure + Release 构建 + CTest 19/19 通过，总耗时 83.03 秒，退出码 0。生成 `releases\飞船单机斗地主-Setup-1.4.exe`，61,981,930 字节，SHA-256 `B98BD3D64FC7ED4869648C6EDE45422392786C1CC70311C30E26128CA18F9BE5`，Authenticode `NotSigned`，VersionInfo 1.4.0；打包日志确认安装包已包含 `nvdaControllerClient.dll` 与 LGPL 许可证。
+- 构建目录产物：`build\release-x64\飞船单机斗地主.exe` 806,400 字节、SHA-256 `800C9D6DD8EC5E8B44BDEF46A468C742CD1132F15F1FA7BCB15DE5CD0143885B`，文件版本 1.4.0.0；更新器 72,192 字节、SHA-256 `991A86B54A9B2EFDDD88404DF76E4EAC0A121496FD24D4B6563A6C7DDAFAF2E6`，文件版本 1.4.0.0。Release 主程序静态依赖不含 Qt6Network，只有更新器引用 Qt Network。
+- 固定公钥签名成功（`python tools\sign_release.py`，`PASSWORD_SOURCE=WINDOWS_DPAPI`），密钥 ID 仍为 `898098f7c562190b1bae909422cf7b5ef09a34bc3e400110fa18cc65a77ff81a`，清单为 `releases\飞船单机斗地主-Setup-1.4.release-manifest.json`。
+- 已发布更新服务器 `windows/stable/1.4`，Release ID 66，`status=published`；脚本核验旧版本可发现 1.4、1.4 显示无更新、服务器回下载文件大小与 SHA-256 和本地安装包一致（`SERVER_VERIFICATION=OK`）。
+- 1.4 覆盖安装通过（静默安装退出码 0）；安装后游戏和更新器文件版本均为 1.4.0.0，NVDA DLL 与许可证位于安装目录，公共桌面快捷方式仍指向安装目录游戏 EXE，用户 `settings.json` 与 `statistics.json` 哈希与安装前一致。按用户“不再对软件做其它动作”的指示，未重新执行卸载或全新安装。
+- 用户已分别确认保益和 NVDA 实际试玩朗读正常；用户已确认运行中切换读屏问题解决。争渡的运行中切换、Windows 讲述人完整人工验收和三级各 10000 局正式强度报告仍未完成，不得写成全部通过。
+- 仓库更新：本提交包含读屏路由、构建/安装清单、测试环境隔离、NVDA 官方客户端与许可登记、版本文件和文档更新；提交与标签 `v1.4` 推送到 `origin/main`。
+
 【本轮正式发布 1.3】2026-09-20
 
 - 本轮按用户指示只做两件事：把最新版本发布到更新服务器、更新开源仓库；产品侧改动只有 `version.txt` 由 1.2 升到 1.3，没有修改任何产品代码、测试或配置。
@@ -28,19 +42,20 @@
 
 二、当前正式状态
 
-- 正式版本：1.3；Windows 文件版本：1.3.0.0。
-- 更新服务器：`windows/stable/1.3`，Release ID 65。
-- 安装包：`releases\飞船单机斗地主-Setup-1.3.exe`
-  - 大小：61,875,841 字节
-  - SHA-256：BDA7C6FC7420A17A535FC2C003920B403FE5F9AAE3038B9CB829B358AC83B8BE
+- 正式版本：1.4；Windows 文件版本：1.4.0.0。
+- 更新服务器：`windows/stable/1.4`，Release ID 66。
+- 安装包：`releases\飞船单机斗地主-Setup-1.4.exe`
+  - 大小：61,981,930 字节
+  - SHA-256：B98BD3D64FC7ED4869648C6EDE45422392786C1CC70311C30E26128CA18F9BE5
   - Authenticode：NotSigned
   - 固定公钥签名密钥 ID：898098f7c562190b1bae909422cf7b5ef09a34bc3e400110fa18cc65a77ff81a
 - 安装目录：`C:\Program Files\飞船单机斗地主`
-  - 游戏 SHA-256：5FE69D68D1AD0FD6F2D06794F753B29AC5301172A28DEBBD4C7D62B897AF9E5A（文件版本 1.2.0.0，即本机试用内核，本轮未替换成 1.3）
-  - 更新器 SHA-256：A32839D45794F3330D45CFB758FF08ED1F44B92C8D0A4F1644AE1D3E1A1321A3
-- 用户桌面和公共桌面快捷方式均指向安装目录游戏 EXE，实际启动验证通过。
-- 1.1 覆盖安装、卸载、用户设置/统计保留、1.2 全新安装均通过；1.3 安装包本轮未做任何安装验证。
-- 下一正式版本必须高于 1.3，从 1.4 开始。
+  - 游戏 SHA-256：800C9D6DD8EC5E8B44BDEF46A468C742CD1132F15F1FA7BCB15DE5CD0143885B（文件版本 1.4.0.0）
+  - NVDA Controller Client SHA-256：2FE60CF00BE929AAE32E95C1E1507A20ADA4902C8FEC273B3CC2D3BF5472932A
+  - 更新器 SHA-256：991A86B54A9B2EFDDD88404DF76E4EAC0A121496FD24D4B6563A6C7DDAFAF2E6
+- 公共桌面快捷方式指向安装目录游戏 EXE，实际启动验证通过。
+- 1.4 覆盖安装与用户设置/统计保留通过；按用户指示未重复卸载或全新安装。1.1、1.2 的完整安装历史结果仍见开发日志。
+- 下一正式版本必须高于 1.4，从 1.5 开始。
 
 三、当前功能
 
@@ -55,6 +70,7 @@
 - 可视牌桌仅接收公共快照、真人手牌和选中牌 ID，无焦点、鼠标穿透，不接触电脑暗牌。
 - 已有 Ctrl+Enter 过牌、拿放牌朗读、中文退出框、动态“地主”称呼、F1 暂停恢复修复和 AI 增强。
 - 1.3 起：拿起顺子两端各一张或连对两端各两张时自动补齐中间点数；顺子、连对、不带翅膀的飞机改用“起点到终点+牌型”报牌。自动补牌不含飞机、三带、四带、炸弹，也不做自动出牌。
+- 1.4 起：动态游戏公告优先调用当前运行读屏的官方接口，支持保益、NVDA、争渡之间运行时切换；NVDA 官方 Controller Client 随安装包分发，无官方接口时回退到 Qt/UIA。
 
 四、自定义快捷键
 

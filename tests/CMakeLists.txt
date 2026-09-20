@@ -157,6 +157,9 @@ target_link_libraries(test_main_window_shortcuts PRIVATE
 target_include_directories(test_main_window_shortcuts PRIVATE "${CMAKE_SOURCE_DIR}/src")
 set_target_properties(test_main_window_shortcuts PROPERTIES AUTOMOC ON)
 add_test(NAME test_main_window_shortcuts COMMAND test_main_window_shortcuts)
+set_tests_properties(test_main_window_shortcuts PROPERTIES
+    ENVIRONMENT "FPDZ_DISABLE_SCREEN_READER_APIS=1"
+)
 
 add_executable(test_sound_management ui/test_sound_management.cpp)
 target_link_libraries(test_sound_management PRIVATE

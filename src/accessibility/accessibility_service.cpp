@@ -65,28 +65,42 @@ bool AccessibilityService::announce(const Announcement& announcement, QObject* t
     auto* widget = qobject_cast<QWidget*>(target);
     if (!widget) return false;
 
-    // Some Windows screen readers can navigate Qt/UIA controls but do not handle
-    // UIA notification events. Expose the message as ordinary control text and
-    // publish a traditional accessibility focus event without moving Qt's real
-    // keyboard focus.
+    // Keep the message represented in the standard accessibility tree. Dynamic
+    // game speech uses the official API of whichever supported reader is active;
+    // the traditional Qt/UIA event remains the no-reader/no-API fallback.
     widget->setAccessibleName(QString::fromStdWString(scheduled->text));
-    QAccessibleEvent event(widget, QAccessible::Focus);
-    QAccessible::updateAccessibility(&event);
+    const bool submittedToReader = m_screenReaderBridge.speak(scheduled->text, true);
+    if (!submittedToReader) {
+        // A reader started after the game can inherit a stale Windows/Qt
+        // accessibility session from the reader that just exited. Refresh the
+        // standard backend once at that process-session boundary, then keep the
+        // existing focus-event fallback for readers without a usable private API.
+        if (m_screenReaderBridge.readerSessionChanged()) {
+            QAccessible::setActive(false);
+            QAccessible::setActive(true);
+        }
+        QAccessibleEvent event(widget, QAccessible::Focus);
+        QAccessible::updateAccessibility(&event);
+    }
     m_lastAnnouncementText = scheduled->text;
     m_lastAnnouncementCategory = scheduled->category;
     m_lastAnnouncementTimer.restart();
     return true;
 }
 void AccessibilityService::stopCurrent() {
+    m_screenReaderBridge.stop();
 }
 void AccessibilityService::clearQueue() {
     m_scheduler.clear();
 }
-std::wstring AccessibilityService::routeName() const { return L"Qt/UIA 标准模式"; }
+std::wstring AccessibilityService::routeName() const { return m_screenReaderBridge.routeName(); }
 std::wstring AccessibilityService::backendStatus() const {
-    return QAccessible::isActive() ? L"Qt无障碍已激活" : L"Qt无障碍接口就绪，当前未激活";
+    const std::wstring reader = m_screenReaderBridge.backendName();
+    const std::wstring qtStatus = QAccessible::isActive() ? L"Qt无障碍已激活" :
+                                                           L"Qt无障碍接口就绪，当前未激活";
+    return reader + L"；" + qtStatus;
 }
 std::wstring AccessibilityService::backendName() const {
-    return L"具体读屏软件未知";
+    return m_screenReaderBridge.backendName();
 }
 } // namespace fpdz
