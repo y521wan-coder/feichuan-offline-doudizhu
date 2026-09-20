@@ -4,7 +4,7 @@ namespace fpdz {
 
 PlayerId TurnManager::advanceTurn(GameState& state) {
     auto& fs = state.fullState();
-    fs.currentPlayer = nextPlayer(fs.currentPlayer);
+    fs.currentPlayer = nextPlayer(fs.currentPlayer, fs.activePlayerCount);
     return fs.currentPlayer;
 }
 

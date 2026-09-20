@@ -47,6 +47,7 @@ const char* soundCategoryKey(SoundCategory category) {
 } // namespace
 
 void AppSettings::normalize() {
+    if (!isSupportedPlayerCount(playerCount)) playerCount = PLAYER_COUNT;
     aiDifficulty = std::clamp(aiDifficulty, 0, 2);
     aiDelay = std::clamp(aiDelay, 0, 3);
     sortMode = std::clamp(sortMode, 0, 2);
@@ -60,6 +61,7 @@ void AppSettings::normalize() {
         backgroundMusicEnabled;
     autoPassSeconds = std::clamp(autoPassSeconds, 3, 1800);
     firstRunGuideRevision = std::max(0, firstRunGuideRevision);
+    shortcuts.normalize();
     for (int i = 0; i < PLAYER_COUNT; ++i) {
         playerNames[static_cast<size_t>(i)] = playerNames[static_cast<size_t>(i)].trimmed();
         if (playerNames[static_cast<size_t>(i)].isEmpty()) {
@@ -86,6 +88,7 @@ QJsonObject AppSettings::toJson() const {
     normalized.normalize();
 
     QJsonObject json;
+    json["playerCount"] = normalized.playerCount;
     json["aiDifficulty"] = normalized.aiDifficulty;
     json["aiDelay"] = normalized.aiDelay;
     json["autoNextRound"] = normalized.autoNextRound;
@@ -118,11 +121,13 @@ QJsonObject AppSettings::toJson() const {
         playerNames.append(name);
     }
     json["playerNames"] = playerNames;
+    json["shortcuts"] = normalized.shortcuts.toJson();
     return json;
 }
 
 AppSettings AppSettings::fromJson(const QJsonObject& json) {
     AppSettings settings;
+    settings.playerCount = jsonInt(json, "playerCount", settings.playerCount);
     settings.aiDifficulty = jsonInt(json, "aiDifficulty", settings.aiDifficulty);
     settings.aiDelay = jsonInt(json, "aiDelay", settings.aiDelay);
     settings.autoNextRound = jsonBool(json, "autoNextRound", settings.autoNextRound);
@@ -167,6 +172,10 @@ AppSettings AppSettings::fromJson(const QJsonObject& json) {
     const auto playerNames = json.value("playerNames").toArray();
     for (int i = 0; i < playerNames.size() && i < PLAYER_COUNT; ++i) {
         settings.playerNames[static_cast<size_t>(i)] = playerNames[i].toString();
+    }
+    const auto shortcuts = json.value(QStringLiteral("shortcuts"));
+    if (shortcuts.isObject()) {
+        settings.shortcuts = ShortcutSettings::fromJson(shortcuts.toObject());
     }
     settings.normalize();
     return settings;

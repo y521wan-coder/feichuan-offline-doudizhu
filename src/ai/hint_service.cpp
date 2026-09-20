@@ -8,17 +8,20 @@ std::vector<CardId> HintService::getHint(const GameState& state, PlayerId player
     const auto& player = fs.players[static_cast<int>(playerId)];
     bool isLeader = fs.lastPlayedCards.empty();
     if (isLeader) {
-        auto moves = LegalMoveGenerator::generateFreePlayMoves(player.hand);
+        auto moves = LegalMoveGenerator::generateFreePlayMoves(
+            player.hand, fs.activePlayerCount);
         if (!moves.empty()) {
             std::vector<CardId> ids;
             for (const auto& c : moves[0]) ids.push_back(c.id());
             return ids;
         }
     } else {
-        CardPattern lastPattern = PatternAnalyzer::analyze(fs.lastPlayedCards);
-        auto moves = LegalMoveGenerator::generateResponseMoves(player.hand, lastPattern);
+        CardPattern lastPattern = PatternAnalyzer::analyze(
+            fs.lastPlayedCards, fs.activePlayerCount);
+        auto moves = LegalMoveGenerator::generateResponseMoves(
+            player.hand, lastPattern, fs.activePlayerCount);
         for (const auto& move : moves) {
-            CardPattern p = PatternAnalyzer::analyze(move);
+            CardPattern p = PatternAnalyzer::analyze(move, fs.activePlayerCount);
             if (p.isValid() && PatternComparator::canBeat(p, lastPattern)) {
                 std::vector<CardId> ids;
                 for (const auto& c : move) ids.push_back(c.id());

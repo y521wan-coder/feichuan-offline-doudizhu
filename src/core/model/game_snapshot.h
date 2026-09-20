@@ -39,6 +39,7 @@ struct PublicActionRecord {
 struct PublicGameSnapshot {
     uint64_t gameId = 0;
     GamePhase phase = static_cast<GamePhase>(0);
+    int activePlayerCount = PLAYER_COUNT;
 
     // Current player whose turn it is
     PlayerId currentPlayer = PlayerId::Player1;
@@ -74,6 +75,7 @@ struct FullGameState {
     uint64_t gameId = 0;
     uint64_t randomSeed = 0;
     bool deterministicRandom = false;
+    int activePlayerCount = PLAYER_COUNT;
 
     // All player states (includes hidden hands)
     std::array<PlayerState, PLAYER_COUNT> players;

@@ -12,10 +12,12 @@ class PatternAnalyzer {
 public:
     // Analyze a set of cards and determine if they form a valid pattern
     // Returns Invalid pattern if the cards don't form any valid combination
-    static CardPattern analyze(const std::vector<Card>& cards);
+    static CardPattern analyze(const std::vector<Card>& cards,
+                               int activePlayerCount = PLAYER_COUNT);
 
     // Analyze by card IDs from a hand
-    static CardPattern analyze(const Hand& hand, const std::vector<CardId>& cardIds);
+    static CardPattern analyze(const Hand& hand, const std::vector<CardId>& cardIds,
+                               int activePlayerCount = PLAYER_COUNT);
 
 private:
     static std::optional<CardPattern> analyzeSingle(const std::vector<Card>& cards, const RankHistogram& hist);

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../ai/ai_difficulty.h"
+#include "shortcut_settings.h"
 #include "../core/audio/sound_category.h"
 #include "../core/model/player.h"
 #include <array>
@@ -22,6 +23,7 @@ enum class BackgroundMusicMode {
 };
 
 struct AppSettings {
+    int playerCount = PLAYER_COUNT; // 2/3=single deck, 4=double deck
     int aiDifficulty = static_cast<int>(AiDifficulty::Beginner);
     int aiDelay = 2; // 0=none, 1=short, 2=normal, 3=long
     bool autoNextRound = false;
@@ -49,6 +51,7 @@ struct AppSettings {
     bool firstRunGuideShown = false;
     int firstRunGuideRevision = 0;
     std::array<QString, PLAYER_COUNT> playerNames{};
+    ShortcutSettings shortcuts;
 
     void normalize();
     bool isSoundCategoryEnabled(SoundCategory category) const;

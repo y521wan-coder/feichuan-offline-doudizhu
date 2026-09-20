@@ -77,13 +77,53 @@ private:
     bool m_valid = false;
 };
 
-// Total cards in double deck
+// Maximum sizes used by the four-player variant and fixed-size public arrays.
 constexpr int TOTAL_CARDS = 108;
 constexpr int CARDS_PER_DECK = 54;
 constexpr int BOTTOM_CARDS = 8;
 constexpr int CARDS_PER_PLAYER = 25;
 constexpr int LANDLORD_TOTAL = 33; // 25 + 8
 constexpr int PLAYER_COUNT = 4;
+
+// Supported local variants. PLAYER_COUNT remains the fixed storage capacity so
+// existing four-player saves and APIs stay compatible; activePlayerCount in a
+// game state selects how many entries participate in the current round.
+constexpr int TWO_PLAYER_COUNT = 2;
+constexpr int TWO_PLAYER_TOTAL_CARDS = 54;
+constexpr int TWO_PLAYER_BOTTOM_CARDS = 3;
+constexpr int TWO_PLAYER_CARDS_PER_PLAYER = 17;
+constexpr int TWO_PLAYER_LANDLORD_TOTAL = 20;
+constexpr int TWO_PLAYER_SET_ASIDE_CARDS = 17;
+constexpr int THREE_PLAYER_COUNT = 3;
+constexpr int THREE_PLAYER_TOTAL_CARDS = 54;
+constexpr int THREE_PLAYER_BOTTOM_CARDS = 3;
+constexpr int THREE_PLAYER_CARDS_PER_PLAYER = 17;
+constexpr int THREE_PLAYER_LANDLORD_TOTAL = 20;
+
+constexpr bool isSupportedPlayerCount(int playerCount) {
+    return playerCount == TWO_PLAYER_COUNT ||
+           playerCount == THREE_PLAYER_COUNT ||
+           playerCount == PLAYER_COUNT;
+}
+
+constexpr int totalCardsForPlayerCount(int playerCount) {
+    return playerCount == TWO_PLAYER_COUNT || playerCount == THREE_PLAYER_COUNT
+        ? THREE_PLAYER_TOTAL_CARDS : TOTAL_CARDS;
+}
+
+constexpr int bottomCardsForPlayerCount(int playerCount) {
+    return playerCount == TWO_PLAYER_COUNT || playerCount == THREE_PLAYER_COUNT
+        ? THREE_PLAYER_BOTTOM_CARDS : BOTTOM_CARDS;
+}
+
+constexpr int cardsPerPlayerForPlayerCount(int playerCount) {
+    return playerCount == TWO_PLAYER_COUNT || playerCount == THREE_PLAYER_COUNT
+        ? THREE_PLAYER_CARDS_PER_PLAYER : CARDS_PER_PLAYER;
+}
+
+constexpr int landlordCardsForPlayerCount(int playerCount) {
+    return cardsPerPlayerForPlayerCount(playerCount) + bottomCardsForPlayerCount(playerCount);
+}
 
 // Number of distinct ranks
 constexpr int RANK_COUNT = 15; // 3-A, 2, SmallJoker, BigJoker

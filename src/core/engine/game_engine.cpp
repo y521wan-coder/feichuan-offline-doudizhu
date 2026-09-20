@@ -27,8 +27,22 @@ CommandResult GameEngine::handleStartGame(const GameCommand& cmd) {
         return {false, ErrorCode::GameAlreadyStarted, L"游戏已经开始"};
     }
 
+    const int requestedPlayerCount = cmd.playerCount.value_or(PLAYER_COUNT);
+    if (!isSupportedPlayerCount(requestedPlayerCount)) {
+        return {false, ErrorCode::InternalError, L"只支持二人、三人或四人模式"};
+    }
+
     m_state = GameState();
     m_state.setGameId(m_gameIdCounter++);
+    m_state.fullState().activePlayerCount = requestedPlayerCount;
+    if (requestedPlayerCount == TWO_PLAYER_COUNT) {
+        // Head-to-head mode places the only computer opposite the human.
+        m_state.fullState().players[1].seat = SeatPosition::North;
+    } else if (requestedPlayerCount == THREE_PLAYER_COUNT) {
+        // In the clockwise three-seat layout player three is the human's
+        // previous/left player rather than the four-player opposite seat.
+        m_state.fullState().players[2].seat = SeatPosition::North;
+    }
 
     const bool deterministicDeal = cmd.randomSeed.has_value();
     const uint64_t seed = cmd.randomSeed.value_or(0);
@@ -46,7 +60,7 @@ CommandResult GameEngine::handleStartGame(const GameCommand& cmd) {
 
     // Deal cards
     m_state.setPhase(GamePhase::Dealing);
-    auto deck = Deck::createDoubleDeck();
+    auto deck = Deck::createForPlayerCount(requestedPlayerCount);
     const bool shuffled = deterministicDeal ? (Deck::shuffle(deck, seed), true)
                                             : Deck::secureShuffle(deck);
     if (!shuffled) {
@@ -56,17 +70,19 @@ CommandResult GameEngine::handleStartGame(const GameCommand& cmd) {
     dealCards(deck);
 
     auto dealEvt = createEvent(GameEventType::CardsDealt);
-    dealEvt.message = L"发牌完成，每人25张";
+    dealEvt.message = L"发牌完成，每人" +
+        std::to_wstring(cardsPerPlayerForPlayerCount(requestedPlayerCount)) + L"张";
     result.events.push_back(dealEvt);
 
-    // The eight bottom cards remain private engine state throughout bidding.
+    // Bottom cards remain private engine state throughout bidding.
     m_state.fullState().bottomCardsRevealed = false;
 
     // Start bidding
     m_state.setPhase(GamePhase::Bidding);
     const uint64_t startingSeat = deterministicDeal
-        ? Deck::deterministicBounded(seed ^ 0x4249445F53544152ULL, PLAYER_COUNT)
-        : Deck::secureBounded(PLAYER_COUNT);
+        ? Deck::deterministicBounded(seed ^ 0x4249445F53544152ULL,
+                                     requestedPlayerCount)
+        : Deck::secureBounded(requestedPlayerCount);
     m_state.fullState().biddingStartPlayer = static_cast<PlayerId>(startingSeat);
     m_state.fullState().currentPlayer = m_state.fullState().biddingStartPlayer;
     m_state.fullState().biddingPlayerCount = 0;
@@ -132,7 +148,7 @@ CommandResult GameEngine::handleBid(const GameCommand& cmd) {
     if (cmd.bidValue == 3) {
         // Determine landlord
         player.role = Role::Landlord;
-        for (int i = 0; i < PLAYER_COUNT; ++i) {
+        for (int i = 0; i < fs.activePlayerCount; ++i) {
             if (i != static_cast<int>(cmd.playerId)) {
                 fs.players[i].role = Role::Farmer;
             }
@@ -164,12 +180,13 @@ CommandResult GameEngine::handleBid(const GameCommand& cmd) {
 
     // Check if bidding round is over
     int passCount = 0;
-    for (int i = 0; i < PLAYER_COUNT; ++i) {
+    for (int i = 0; i < fs.activePlayerCount; ++i) {
         if (fs.players[i].hasPassedBid) passCount++;
     }
 
-    const bool allPlayersActed = fs.biddingPlayerCount >= PLAYER_COUNT;
-    const bool onlyHighestBidderRemains = fs.highestBid > 0 && passCount == PLAYER_COUNT - 1;
+    const bool allPlayersActed = fs.biddingPlayerCount >= fs.activePlayerCount;
+    const bool onlyHighestBidderRemains = fs.highestBid > 0 &&
+        passCount == fs.activePlayerCount - 1;
     if (allPlayersActed || onlyHighestBidderRemains) {
         // Bidding round over
         if (fs.highestBid == 0) {
@@ -183,6 +200,7 @@ CommandResult GameEngine::handleBid(const GameCommand& cmd) {
             m_state.setPhase(GamePhase::NotStarted);
             GameCommand redealCmd;
             redealCmd.type = GameCommandType::StartGame;
+            redealCmd.playerCount = fs.activePlayerCount;
             if (deterministicRedeal) {
                 redealCmd.randomSeed = previousSeed ^ 0x52454445414C5F31ULL ^
                     (static_cast<uint64_t>(redealCount) * 0x9E3779B97F4A7C15ULL);
@@ -201,7 +219,7 @@ CommandResult GameEngine::handleBid(const GameCommand& cmd) {
         // Highest bidder becomes landlord
         auto& landlord = fs.players[static_cast<int>(fs.highestBidder)];
         landlord.role = Role::Landlord;
-        for (int i = 0; i < PLAYER_COUNT; ++i) {
+        for (int i = 0; i < fs.activePlayerCount; ++i) {
             if (i != static_cast<int>(fs.highestBidder)) {
                 fs.players[i].role = Role::Farmer;
             }
@@ -232,7 +250,7 @@ CommandResult GameEngine::handleBid(const GameCommand& cmd) {
 
     // Advance to next player who hasn't decided
     do {
-        fs.currentPlayer = nextPlayer(fs.currentPlayer);
+        fs.currentPlayer = nextPlayer(fs.currentPlayer, fs.activePlayerCount);
     } while (fs.players[static_cast<int>(fs.currentPlayer)].hasPassedBid);
 
     auto nextEvt = createEvent(GameEventType::BidRequested);
@@ -286,14 +304,15 @@ CommandResult GameEngine::handlePlayCards(const GameCommand& cmd) {
     }
 
     // Analyze pattern
-    CardPattern pattern = PatternAnalyzer::analyze(playedCards);
+    CardPattern pattern = PatternAnalyzer::analyze(playedCards, fs.activePlayerCount);
     if (!pattern.isValid()) {
         return {false, ErrorCode::InvalidPattern, L"选择的牌不能组成有效牌型"};
     }
 
     // Check if it can beat the last play
     if (!TurnManager::isLeader(m_state)) {
-        CardPattern lastPattern = PatternAnalyzer::analyze(fs.lastPlayedCards);
+        CardPattern lastPattern = PatternAnalyzer::analyze(fs.lastPlayedCards,
+                                                           fs.activePlayerCount);
         if (!PatternComparator::canBeat(pattern, lastPattern)) {
             return {false, ErrorCode::CannotBeatLastPlay, L"无法压过上一手牌"};
         }
@@ -432,8 +451,8 @@ CommandResult GameEngine::handlePass(const GameCommand& cmd) {
 
     TurnManager::recordPass(m_state);
 
-    // Check if 3 consecutive passes -> trick reset
-    if (fs.consecutivePasses >= 3) {
+    // Every other active player passed, so the trick resets.
+    if (fs.consecutivePasses >= fs.activePlayerCount - 1) {
         // The last player who played gets free turn
         fs.currentPlayer = fs.lastPlayedBy;
         fs.consecutivePasses = 0;
@@ -513,23 +532,34 @@ CommandResult GameEngine::handleNextRound(const GameCommand& cmd) {
     GameCommand newCmd;
     newCmd.type = GameCommandType::StartGame;
     newCmd.randomSeed = cmd.randomSeed;
+    newCmd.playerCount = cmd.playerCount.value_or(m_state.fullState().activePlayerCount);
     return handleStartGame(newCmd);
 }
 
 void GameEngine::dealCards(const std::vector<Card>& deck) {
     auto& fs = m_state.fullState();
 
-    // Reserve bottom cards (last 8)
+    const int activePlayerCount = fs.activePlayerCount;
+    const int totalCards = totalCardsForPlayerCount(activePlayerCount);
+    const int bottomCardCount = bottomCardsForPlayerCount(activePlayerCount);
+    const int cardsPerPlayer = cardsPerPlayerForPlayerCount(activePlayerCount);
+    assert(static_cast<int>(deck.size()) == totalCards);
+
+    // Reserve the variant's bottom cards. In two-player mode the 17 cards
+    // between both hands and these final three cards are face-down set-aside
+    // cards: they never enter a hand or any public/AI observation.
     fs.bottomCards.clear();
-    for (int i = TOTAL_CARDS - BOTTOM_CARDS; i < TOTAL_CARDS; ++i) {
+    for (int i = totalCards - bottomCardCount; i < totalCards; ++i) {
         fs.bottomCards.push_back(deck[i]);
     }
 
-    // Deal 25 cards to each player
+    // Clear fixed-capacity player storage before dealing to active seats.
     for (int p = 0; p < PLAYER_COUNT; ++p) {
         fs.players[p].hand.clear();
-        for (int i = 0; i < CARDS_PER_PLAYER; ++i) {
-            fs.players[p].hand.addCard(deck[p * CARDS_PER_PLAYER + i]);
+        if (p < activePlayerCount) {
+            for (int i = 0; i < cardsPerPlayer; ++i) {
+                fs.players[p].hand.addCard(deck[p * cardsPerPlayer + i]);
+            }
         }
         fs.players[p].hand.sortByRank();
         fs.players[p].role = Role::Undetermined;
@@ -551,7 +581,12 @@ GameEvent GameEngine::createEvent(GameEventType type) {
 
 void GameEngine::applyBombMultiplier(CardPatternType bombType) {
     auto& fs = m_state.fullState();
-    int mult = bombMultiplier(bombType);
+    // Standard single-deck Doudizhu doubles for either a four-card bomb or
+    // the joker rocket. The existing four-player variant keeps its graduated
+    // gun/king-bomb/cannon/... multiplier table unchanged.
+    const int mult = fs.activePlayerCount == TWO_PLAYER_COUNT ||
+                     fs.activePlayerCount == THREE_PLAYER_COUNT
+        ? 2 : bombMultiplier(bombType);
     fs.currentMultiplier *= mult;
     fs.currentMultiplier = ScoringEngine::applyMultiplierCap(fs.currentMultiplier);
     fs.bombCount++;

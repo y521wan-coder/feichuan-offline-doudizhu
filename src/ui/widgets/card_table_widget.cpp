@@ -239,7 +239,7 @@ int CardTableWidget::displayedSelectedCardCount() const {
 
 int CardTableWidget::displayedOpponentBackCount(PlayerId playerId) const {
     const int index = static_cast<int>(playerId);
-    if (index <= 0 || index >= PLAYER_COUNT) return 0;
+    if (index <= 0 || index >= m_snapshot.activePlayerCount) return 0;
     return m_snapshot.players[static_cast<size_t>(index)].remainingCards;
 }
 
@@ -277,22 +277,44 @@ void CardTableWidget::paintEvent(QPaintEvent* event) {
     const QRectF rightPanel(widthValue - panelWidth - 10.0, heightValue * 0.34,
                            panelWidth, panelHeight);
     const QRectF humanPanel(10.0, heightValue - 35.0, panelWidth, panelHeight);
-    drawPlayerPanel(painter, topPanel, m_snapshot.players[2],
-                    m_snapshot.currentPlayer == PlayerId::Player3);
-    drawPlayerPanel(painter, rightPanel, m_snapshot.players[1],
-                    m_snapshot.currentPlayer == PlayerId::Player2);
-    drawPlayerPanel(painter, leftPanel, m_snapshot.players[3],
-                    m_snapshot.currentPlayer == PlayerId::Player4);
+    if (m_snapshot.activePlayerCount == TWO_PLAYER_COUNT) {
+        drawPlayerPanel(painter, topPanel, m_snapshot.players[1],
+                        m_snapshot.currentPlayer == PlayerId::Player2);
+    } else {
+        drawPlayerPanel(painter, rightPanel, m_snapshot.players[1],
+                        m_snapshot.currentPlayer == PlayerId::Player2);
+    }
+    if (m_snapshot.activePlayerCount == THREE_PLAYER_COUNT) {
+        drawPlayerPanel(painter, leftPanel, m_snapshot.players[2],
+                        m_snapshot.currentPlayer == PlayerId::Player3);
+    } else if (m_snapshot.activePlayerCount == PLAYER_COUNT) {
+        drawPlayerPanel(painter, topPanel, m_snapshot.players[2],
+                        m_snapshot.currentPlayer == PlayerId::Player3);
+        drawPlayerPanel(painter, leftPanel, m_snapshot.players[3],
+                        m_snapshot.currentPlayer == PlayerId::Player4);
+    }
     drawPlayerPanel(painter, humanPanel, m_snapshot.players[0],
                     m_snapshot.currentPlayer == PlayerId::Player1);
 
-    drawBackStack(painter,
-                  QRectF(bounds.center().x() - 45.0, 34.0, 90.0, 56.0),
-                  m_snapshot.players[2].remainingCards, false);
-    drawBackStack(painter, QRectF(widthValue - 69.0, heightValue * 0.42, 55.0, 70.0),
-                  m_snapshot.players[1].remainingCards, true);
-    drawBackStack(painter, QRectF(14.0, heightValue * 0.42, 55.0, 70.0),
-                  m_snapshot.players[3].remainingCards, true);
+    if (m_snapshot.activePlayerCount == TWO_PLAYER_COUNT) {
+        drawBackStack(painter,
+                      QRectF(bounds.center().x() - 45.0, 34.0, 90.0, 56.0),
+                      m_snapshot.players[1].remainingCards, false);
+    } else {
+        drawBackStack(painter,
+                      QRectF(widthValue - 69.0, heightValue * 0.42, 55.0, 70.0),
+                      m_snapshot.players[1].remainingCards, true);
+    }
+    if (m_snapshot.activePlayerCount == THREE_PLAYER_COUNT) {
+        drawBackStack(painter, QRectF(14.0, heightValue * 0.42, 55.0, 70.0),
+                      m_snapshot.players[2].remainingCards, true);
+    } else if (m_snapshot.activePlayerCount == PLAYER_COUNT) {
+        drawBackStack(painter,
+                      QRectF(bounds.center().x() - 45.0, 34.0, 90.0, 56.0),
+                      m_snapshot.players[2].remainingCards, false);
+        drawBackStack(painter, QRectF(14.0, heightValue * 0.42, 55.0, 70.0),
+                      m_snapshot.players[3].remainingCards, true);
+    }
 
     const QRectF bottomArea(widthValue - 220.0, 8.0, 205.0, 64.0);
     QFont captionFont = painter.font();
@@ -309,7 +331,8 @@ void CardTableWidget::paintEvent(QPaintEvent* event) {
         drawFaceFan(painter, m_snapshot.bottomCards,
                     bottomArea.adjusted(0.0, 18.0, 0.0, 0.0), 42.0);
     } else {
-        drawBackStack(painter, bottomArea.adjusted(0.0, 18.0, 0.0, 0.0), BOTTOM_CARDS, false);
+        drawBackStack(painter, bottomArea.adjusted(0.0, 18.0, 0.0, 0.0),
+                      bottomCardsForPlayerCount(m_snapshot.activePlayerCount), false);
     }
 
     const QRectF playArea(widthValue * 0.22, heightValue * 0.30,

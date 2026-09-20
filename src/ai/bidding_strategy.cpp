@@ -61,10 +61,10 @@ int structuralScore(const std::vector<Card>& cards) {
 }
 
 double expectedBottomImprovement(const Hand& hand, const AiLevelProfile& profile,
-                                 uint64_t seed) {
+                                 uint64_t seed, int activePlayerCount) {
     if (profile.publicInferenceSamples <= 0) return 0.0;
     const int base = structuralScore(hand.cards());
-    auto unknown = Deck::createDoubleDeck();
+    auto unknown = Deck::createForPlayerCount(activePlayerCount);
     unknown.erase(std::remove_if(unknown.begin(), unknown.end(), [&](const Card& card) {
         return hand.contains(card.id());
     }), unknown.end());
@@ -72,12 +72,13 @@ double expectedBottomImprovement(const Hand& hand, const AiLevelProfile& profile
     std::mt19937_64 random(seed ^ 0x424F54544F4D5F38ULL);
     double total = 0.0;
     std::vector<Card> hypothetical = hand.cards();
-    hypothetical.reserve(hand.size() + BOTTOM_CARDS);
+    const int bottomCardCount = bottomCardsForPlayerCount(activePlayerCount);
+    hypothetical.reserve(hand.size() + bottomCardCount);
     for (int sample = 0; sample < profile.publicInferenceSamples; ++sample) {
         std::shuffle(unknown.begin(), unknown.end(), random);
         hypothetical.resize(hand.size());
         hypothetical.insert(hypothetical.end(), unknown.begin(),
-                            unknown.begin() + BOTTOM_CARDS);
+                            unknown.begin() + bottomCardCount);
         total += structuralScore(hypothetical) - base;
     }
     return total / profile.publicInferenceSamples;
@@ -86,11 +87,13 @@ double expectedBottomImprovement(const Hand& hand, const AiLevelProfile& profile
 } // namespace
 
 int BiddingStrategy::decideBid(const Hand& hand, int currentHighestBid,
-                               AiDifficulty difficulty, uint64_t randomSalt) {
+                               AiDifficulty difficulty, uint64_t randomSalt,
+                               int activePlayerCount) {
     const auto& profile = aiLevelProfile(difficulty);
     double score = structuralScore(hand.cards());
     if (difficulty == AiDifficulty::Advanced) {
-        score += expectedBottomImprovement(hand, profile, randomSalt) * 0.45;
+        score += expectedBottomImprovement(hand, profile, randomSalt,
+                                           activePlayerCount) * 0.45;
     }
 
     int conservativeOffset = 0;

@@ -14,7 +14,7 @@ bool isHighControlMove(const LegalMove& move) {
 }
 
 int landlordIndex(const PublicGameSnapshot& state) {
-    for (int index = 0; index < PLAYER_COUNT; ++index) {
+    for (int index = 0; index < state.activePlayerCount; ++index) {
         if (state.players[index].role == Role::Landlord) return index;
     }
     return -1;

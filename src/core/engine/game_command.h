@@ -30,6 +30,9 @@ struct GameCommand {
     // No value means a real game using operating-system entropy. Tests pass a
     // seed to obtain a stable, reproducible deal.
     std::optional<uint64_t> randomSeed;
+    // StartGame may select a supported local variant. No value preserves the
+    // legacy/default four-player behavior.
+    std::optional<int> playerCount;
     bool allowPassAsLeader = false;
     // AI-only diagnostic metadata. It must contain a stable reason code and
     // public-information facts only; the engine never uses it for validation.

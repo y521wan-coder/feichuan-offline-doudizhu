@@ -85,9 +85,13 @@ int typePriority(const LegalMove& move) {
         case CardPatternType::Straight:
         case CardPatternType::ConsecutivePairs:
         case CardPatternType::Airplane:
+        case CardPatternType::AirplaneWithSingles:
         case CardPatternType::AirplaneWithPairs:
+        case CardPatternType::FourWithTwoSingles:
+        case CardPatternType::FourWithTwoPairs:
             result += 130;
             break;
+        case CardPatternType::TripleWithSingle:
         case CardPatternType::TripleWithPair:
             result += 70;
             break;
@@ -161,6 +165,14 @@ bool hasSamePatternResponse(const RankCounts& counts,
                 if (counts[rank] >= 3) return true;
             }
             return false;
+        case CardPatternType::TripleWithSingle:
+            for (int triple = main + 1; triple < RANK_COUNT; ++triple) {
+                if (counts[triple] < 3) continue;
+                for (int single = 0; single < RANK_COUNT; ++single) {
+                    if (single != triple && counts[single] >= 1) return true;
+                }
+            }
+            return false;
         case CardPatternType::TripleWithPair:
             for (int triple = main + 1; triple < RANK_COUNT; ++triple) {
                 if (counts[triple] < 3) continue;
@@ -175,6 +187,28 @@ bool hasSamePatternResponse(const RankCounts& counts,
             return hasSequence(counts, 2, pattern.mainLength, main);
         case CardPatternType::Airplane:
             return hasSequence(counts, 3, pattern.mainLength, main);
+        case CardPatternType::AirplaneWithSingles:
+            for (int start = main + 1;
+                 start <= rankWeight(Rank::Ace) - pattern.mainLength + 1; ++start) {
+                RankCounts remaining = counts;
+                bool body = true;
+                for (int offset = 0; offset < pattern.mainLength; ++offset) {
+                    if (remaining[start + offset] < 3) {
+                        body = false;
+                        break;
+                    }
+                    remaining[start + offset] -= 3;
+                }
+                if (!body) continue;
+                int singles = 0;
+                for (int rank = 0; rank < RANK_COUNT; ++rank) {
+                    if (rank < start || rank >= start + pattern.mainLength) {
+                        singles += remaining[rank];
+                    }
+                }
+                if (singles >= pattern.mainLength) return true;
+            }
+            return false;
         case CardPatternType::AirplaneWithPairs:
             for (int start = main + 1;
                  start <= rankWeight(Rank::Ace) - pattern.mainLength + 1; ++start) {
@@ -193,6 +227,26 @@ bool hasSamePatternResponse(const RankCounts& counts,
                     if (count >= 2) ++pairs;
                 }
                 if (pairs >= pattern.mainLength) return true;
+            }
+            return false;
+        case CardPatternType::FourWithTwoSingles:
+            for (int four = main + 1; four < RANK_COUNT; ++four) {
+                if (counts[four] < 4) continue;
+                int singles = 0;
+                for (int rank = 0; rank < RANK_COUNT; ++rank) {
+                    if (rank != four) singles += counts[rank];
+                }
+                if (singles >= 2) return true;
+            }
+            return false;
+        case CardPatternType::FourWithTwoPairs:
+            for (int four = main + 1; four < RANK_COUNT; ++four) {
+                if (counts[four] < 4) continue;
+                int pairs = 0;
+                for (int rank = 0; rank < RANK_COUNT; ++rank) {
+                    if (rank != four && counts[rank] >= 2) ++pairs;
+                }
+                if (pairs >= 2) return true;
             }
             return false;
         default:
@@ -291,7 +345,8 @@ int StrategicSearchEvaluator::estimateTurns(const Hand& hand, int depth,
         return best;
     }
 
-    auto moves = LegalMoveGenerator::generateLegalMoves(hand);
+    auto moves = LegalMoveGenerator::generateLegalMoves(
+        hand, std::nullopt, m_observation.publicState.activePlayerCount);
     std::sort(moves.begin(), moves.end(), [](const LegalMove& left,
                                              const LegalMove& right) {
         return typePriority(left) > typePriority(right);
@@ -337,7 +392,9 @@ StrategicSearchEvaluator::buildPublicSamples() const {
     }
 
     int landlord = -1;
-    for (int player = 0; player < PLAYER_COUNT; ++player) {
+    const int activePlayerCount = m_observation.publicState.activePlayerCount;
+    const int totalCards = totalCardsForPlayerCount(activePlayerCount);
+    for (int player = 0; player < activePlayerCount; ++player) {
         if (m_observation.publicState.players[player].role == Role::Landlord) {
             landlord = player;
             break;
@@ -346,7 +403,7 @@ StrategicSearchEvaluator::buildPublicSamples() const {
 
     Sample fixed{};
     std::array<int, PLAYER_COUNT> capacities{};
-    for (int player = 0; player < PLAYER_COUNT; ++player) {
+    for (int player = 0; player < activePlayerCount; ++player) {
         if (player == static_cast<int>(m_observation.playerId)) continue;
         capacities[player] = std::max(0,
             m_observation.publicState.players[player].remainingCards);
@@ -363,7 +420,7 @@ StrategicSearchEvaluator::buildPublicSamples() const {
     }
 
     std::vector<Card> unknownCards;
-    for (int id = 0; id < TOTAL_CARDS; ++id) {
+    for (int id = 0; id < totalCards; ++id) {
         if (!unavailable[id]) unknownCards.push_back(Card::create(static_cast<CardId>(id)));
     }
     const int required = std::accumulate(capacities.begin(), capacities.end(), 0);
@@ -386,7 +443,7 @@ StrategicSearchEvaluator::buildPublicSamples() const {
             std::array<int, PLAYER_COUNT> weights{};
             int totalWeight = 0;
             const bool highCard = card.rank() >= Rank::Ace;
-            for (int player = 0; player < PLAYER_COUNT; ++player) {
+            for (int player = 0; player < activePlayerCount; ++player) {
                 if (remainingCapacities[player] <= 0) continue;
                 const auto& publicPlayer = m_observation.publicState.players[player];
                 int weight = remainingCapacities[player] * 100;
@@ -400,11 +457,11 @@ StrategicSearchEvaluator::buildPublicSamples() const {
             std::uniform_int_distribution<int> choose(1, totalWeight);
             int ticket = choose(random);
             int selectedPlayer = 0;
-            for (; selectedPlayer < PLAYER_COUNT; ++selectedPlayer) {
+            for (; selectedPlayer < activePlayerCount; ++selectedPlayer) {
                 ticket -= weights[selectedPlayer];
                 if (ticket <= 0) break;
             }
-            selectedPlayer = std::min(selectedPlayer, PLAYER_COUNT - 1);
+            selectedPlayer = std::min(selectedPlayer, activePlayerCount - 1);
             ++sample[selectedPlayer][rankWeight(card.rank())];
             --remainingCapacities[selectedPlayer];
             ++assigned;
@@ -425,10 +482,12 @@ int StrategicSearchEvaluator::publicInformationAdjustment(
     for (const auto& sample : m_publicSamples) {
         double sampleRisk = 0.0;
         double sampleTeam = 0.0;
-        for (int player = 0; player < PLAYER_COUNT; ++player) {
+        const int activePlayerCount = m_observation.publicState.activePlayerCount;
+        for (int player = 0; player < activePlayerCount; ++player) {
             if (player == ownIndex || !canBeat(sample[player], move.pattern)) continue;
             const auto& publicPlayer = m_observation.publicState.players[player];
-            const int clockwiseDistance = (player - ownIndex + PLAYER_COUNT) % PLAYER_COUNT;
+            const int clockwiseDistance =
+                (player - ownIndex + activePlayerCount) % activePlayerCount;
             const double turnWeight = clockwiseDistance == 1 ? 1.20 : 1.0;
             if (isHostile(ownRole, publicPlayer.role)) {
                 const double endgameWeight = publicPlayer.remainingCards <= 2 ? 1.75 : 1.0;

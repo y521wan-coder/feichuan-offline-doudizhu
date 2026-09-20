@@ -37,6 +37,20 @@ private slots:
         auto p = PatternAnalyzer::analyze(cards);
         QCOMPARE(p.type, CardPatternType::Invalid);
     }
+    void testTripleWithSingleIsValidOnlyInThreePlayerMode() {
+        const std::vector<Card> cards = {
+            Card::create(Rank::Five, Suit::Spades, 0),
+            Card::create(Rank::Five, Suit::Hearts, 0),
+            Card::create(Rank::Five, Suit::Clubs, 0),
+            Card::create(Rank::Three, Suit::Diamonds, 0)
+        };
+        QCOMPARE(PatternAnalyzer::analyze(cards, THREE_PLAYER_COUNT).type,
+                 CardPatternType::TripleWithSingle);
+        QCOMPARE(PatternAnalyzer::analyze(cards, TWO_PLAYER_COUNT).type,
+                 CardPatternType::TripleWithSingle);
+        QCOMPARE(PatternAnalyzer::analyze(cards, PLAYER_COUNT).type,
+                 CardPatternType::Invalid);
+    }
     void testTripleWithPair() {
         std::vector<Card> cards = {
             Card::create(Rank::Five, Suit::Spades, 0),
@@ -138,6 +152,25 @@ private slots:
         auto p = PatternAnalyzer::analyze(cards);
         QCOMPARE(p.type, CardPatternType::Invalid);
     }
+    void testAirplaneWithSinglesIsValidOnlyInThreePlayerMode() {
+        const std::vector<Card> cards = {
+            Card::create(Rank::Three, Suit::Spades, 0),
+            Card::create(Rank::Three, Suit::Hearts, 0),
+            Card::create(Rank::Three, Suit::Clubs, 0),
+            Card::create(Rank::Four, Suit::Spades, 0),
+            Card::create(Rank::Four, Suit::Hearts, 0),
+            Card::create(Rank::Four, Suit::Clubs, 0),
+            Card::create(Rank::Seven, Suit::Spades, 0),
+            Card::create(Rank::Eight, Suit::Hearts, 0)
+        };
+        const auto pattern = PatternAnalyzer::analyze(cards, THREE_PLAYER_COUNT);
+        QCOMPARE(pattern.type, CardPatternType::AirplaneWithSingles);
+        QCOMPARE(pattern.mainLength, 2);
+        QCOMPARE(PatternAnalyzer::analyze(cards, TWO_PLAYER_COUNT).type,
+                 CardPatternType::AirplaneWithSingles);
+        QCOMPARE(PatternAnalyzer::analyze(cards, PLAYER_COUNT).type,
+                 CardPatternType::Invalid);
+    }
     void testFourWithTwoIsInvalid() {
         std::vector<Card> cards = {
             Card::create(Rank::Eight, Suit::Spades, 0),
@@ -149,6 +182,34 @@ private slots:
         };
         auto p = PatternAnalyzer::analyze(cards);
         QCOMPARE(p.type, CardPatternType::Invalid);
+    }
+    void testFourWithTwoVariantsAreValidOnlyInThreePlayerMode() {
+        const std::vector<Card> singles = {
+            Card::create(Rank::Eight, Suit::Spades, 0),
+            Card::create(Rank::Eight, Suit::Hearts, 0),
+            Card::create(Rank::Eight, Suit::Clubs, 0),
+            Card::create(Rank::Eight, Suit::Diamonds, 0),
+            Card::create(Rank::Three, Suit::Spades, 0),
+            Card::create(Rank::Four, Suit::Hearts, 0)
+        };
+        QCOMPARE(PatternAnalyzer::analyze(singles, THREE_PLAYER_COUNT).type,
+                 CardPatternType::FourWithTwoSingles);
+        QCOMPARE(PatternAnalyzer::analyze(singles, TWO_PLAYER_COUNT).type,
+                 CardPatternType::FourWithTwoSingles);
+        QCOMPARE(PatternAnalyzer::analyze(singles, PLAYER_COUNT).type,
+                 CardPatternType::Invalid);
+
+        auto pairs = std::vector<Card>(singles.begin(), singles.begin() + 4);
+        pairs.push_back(Card::create(Rank::Three, Suit::Spades, 0));
+        pairs.push_back(Card::create(Rank::Three, Suit::Hearts, 0));
+        pairs.push_back(Card::create(Rank::Four, Suit::Spades, 0));
+        pairs.push_back(Card::create(Rank::Four, Suit::Hearts, 0));
+        QCOMPARE(PatternAnalyzer::analyze(pairs, THREE_PLAYER_COUNT).type,
+                 CardPatternType::FourWithTwoPairs);
+        QCOMPARE(PatternAnalyzer::analyze(pairs, TWO_PLAYER_COUNT).type,
+                 CardPatternType::FourWithTwoPairs);
+        QCOMPARE(PatternAnalyzer::analyze(pairs, PLAYER_COUNT).type,
+                 CardPatternType::Invalid);
     }
     void testGun() {
         std::vector<Card> cards = {

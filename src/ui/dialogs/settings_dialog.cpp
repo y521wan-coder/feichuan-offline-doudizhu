@@ -14,6 +14,16 @@ SettingsDialog::SettingsDialog(const AppSettings& settings, QWidget* parent)
     auto* layout = new QVBoxLayout(this);
     auto* form = new QFormLayout();
 
+    m_playerCount = new QComboBox(this);
+    m_playerCount->setObjectName(QStringLiteral("playerCountComboBox"));
+    m_playerCount->addItem(QString::fromUtf8(u8"四人（两副牌）"), PLAYER_COUNT);
+    m_playerCount->addItem(QString::fromUtf8(u8"三人（一副牌）"), THREE_PLAYER_COUNT);
+    m_playerCount->addItem(QString::fromUtf8(u8"二人（一副牌）"), TWO_PLAYER_COUNT);
+    const int playerCountIndex = m_playerCount->findData(settings.playerCount);
+    m_playerCount->setCurrentIndex(playerCountIndex >= 0 ? playerCountIndex : 0);
+    m_playerCount->setAccessibleName(QString::fromUtf8(u8"游戏人数"));
+    form->addRow(QString::fromUtf8(u8"游戏人数"), m_playerCount);
+
     m_autoPassEnabled = new QCheckBox(QString::fromStdWString(L"轮到我时超时自动过牌"), this);
     m_autoPassEnabled->setChecked(settings.autoPassEnabled);
     form->addRow(QString::fromStdWString(L"自动过牌"), m_autoPassEnabled);
@@ -98,6 +108,7 @@ SettingsDialog::SettingsDialog(const AppSettings& settings, QWidget* parent)
 
 AppSettings SettingsDialog::settings() const {
     AppSettings settings = m_settings;
+    settings.playerCount = m_playerCount->currentData().toInt();
     settings.autoPassEnabled = m_autoPassEnabled->isChecked();
     settings.autoPassSeconds = m_autoPassSeconds->value();
     const int selectedMode = m_aiDifficulty->currentData().toInt();

@@ -5,7 +5,8 @@
 
 namespace fpdz {
 
-CardPattern PatternAnalyzer::analyze(const std::vector<Card>& cards) {
+CardPattern PatternAnalyzer::analyze(const std::vector<Card>& cards,
+                                     int activePlayerCount) {
     if (cards.empty()) {
         return CardPattern{};
     }
@@ -24,7 +25,13 @@ CardPattern PatternAnalyzer::analyze(const std::vector<Card>& cards) {
     if (auto p = analyzeTriple(cards, hist)) return *p;
     // Bombs (check before combinations since they're special)
     if (auto p = analyzeBombs(cards, hist)) return *p;
-    // Wanerba four-player Doudizhu only allows triple with a pair, not triple with a single.
+    const bool standardSingleDeckRules =
+        activePlayerCount == TWO_PLAYER_COUNT || activePlayerCount == THREE_PLAYER_COUNT;
+    // Standard single-deck Doudizhu allows triple with a single; the existing
+    // four-player rules intentionally keep only triple with a pair.
+    if (standardSingleDeckRules && total == 4) {
+        if (auto p = analyzeTripleWithSingle(cards, hist)) return *p;
+    }
     if (total == 5) {
         if (auto p = analyzeTripleWithPair(cards, hist)) return *p;
     }
@@ -39,14 +46,22 @@ CardPattern PatternAnalyzer::analyze(const std::vector<Card>& cards) {
     // Airplane variants
     if (total >= RuleSet::MIN_AIRPLANE_LENGTH * 3) {
         if (auto p = analyzeAirplane(cards, hist)) return *p;
-        // Airplane wings must be pairs in Wanerba four-player Doudizhu.
+        if (standardSingleDeckRules) {
+            if (auto p = analyzeAirplaneWithSingles(cards, hist)) return *p;
+        }
         if (auto p = analyzeAirplaneWithPairs(cards, hist)) return *p;
+    }
+    if (standardSingleDeckRules) {
+        if (auto p = analyzeFourWithTwoSingles(cards, hist)) return *p;
+        if (auto p = analyzeFourWithTwoPairs(cards, hist)) return *p;
     }
 
     return CardPattern{};
 }
 
-CardPattern PatternAnalyzer::analyze(const Hand& hand, const std::vector<CardId>& cardIds) {
+CardPattern PatternAnalyzer::analyze(const Hand& hand,
+                                     const std::vector<CardId>& cardIds,
+                                     int activePlayerCount) {
     std::vector<Card> cards;
     for (CardId id : cardIds) {
         if (!hand.contains(id)) return CardPattern{};
@@ -57,7 +72,7 @@ CardPattern PatternAnalyzer::analyze(const Hand& hand, const std::vector<CardId>
             }
         }
     }
-    return analyze(cards);
+    return analyze(cards, activePlayerCount);
 }
 
 std::optional<CardPattern> PatternAnalyzer::analyzeSingle(const std::vector<Card>& cards, const RankHistogram&) {

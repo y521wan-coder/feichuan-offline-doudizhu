@@ -15,10 +15,12 @@ struct LegalMove {
 class LegalMoveGenerator {
 public:
     static std::vector<LegalMove> generateLegalMoves(
-        const Hand& hand, const std::optional<CardPattern>& lastPlay = std::nullopt);
-    static std::vector<std::vector<Card>> generateFreePlayMoves(const Hand& hand);
+        const Hand& hand, const std::optional<CardPattern>& lastPlay = std::nullopt,
+        int activePlayerCount = PLAYER_COUNT);
+    static std::vector<std::vector<Card>> generateFreePlayMoves(
+        const Hand& hand, int activePlayerCount = PLAYER_COUNT);
     static std::vector<std::vector<Card>> generateResponseMoves(const Hand& hand,
-                                                                 const CardPattern& lastPlay);
+        const CardPattern& lastPlay, int activePlayerCount = PLAYER_COUNT);
 };
 
 } // namespace fpdz

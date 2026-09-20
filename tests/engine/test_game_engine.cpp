@@ -82,6 +82,261 @@ private slots:
         QCOMPARE(static_cast<int>(publicReveal->cards.size()), BOTTOM_CARDS);
     }
 
+    void testStartThreePlayerGameUsesStandardSingleDeckDeal() {
+        GameEngine engine;
+        GameCommand start;
+        start.type = GameCommandType::StartGame;
+        start.randomSeed = 42;
+        start.playerCount = THREE_PLAYER_COUNT;
+        const auto result = engine.execute(start);
+        QVERIFY(result.success);
+        QCOMPARE(engine.fullState().activePlayerCount, THREE_PLAYER_COUNT);
+        QCOMPARE(engine.publicSnapshot().activePlayerCount, THREE_PLAYER_COUNT);
+        QCOMPARE(engine.state().phase(), GamePhase::Bidding);
+        QCOMPARE(engine.fullState().players[2].seat, SeatPosition::North);
+
+        std::array<bool, THREE_PLAYER_TOTAL_CARDS> seen{};
+        for (int player = 0; player < THREE_PLAYER_COUNT; ++player) {
+            const auto& hand = engine.fullState().players[player].hand;
+            QCOMPARE(hand.size(), THREE_PLAYER_CARDS_PER_PLAYER);
+            for (const auto& card : hand.cards()) {
+                QVERIFY(card.id() < THREE_PLAYER_TOTAL_CARDS);
+                QVERIFY(!seen[card.id()]);
+                seen[card.id()] = true;
+            }
+        }
+        QVERIFY(engine.fullState().players[3].hand.empty());
+        QCOMPARE(engine.fullState().players[3].role, Role::Undetermined);
+        QCOMPARE(static_cast<int>(engine.fullState().bottomCards.size()),
+                 THREE_PLAYER_BOTTOM_CARDS);
+        for (const auto& card : engine.fullState().bottomCards) {
+            QVERIFY(card.id() < THREE_PLAYER_TOTAL_CARDS);
+            QVERIFY(!seen[card.id()]);
+            seen[card.id()] = true;
+        }
+        QVERIFY(std::all_of(seen.begin(), seen.end(), [](bool value) { return value; }));
+        QVERIFY(!engine.publicSnapshot().bottomCardsRevealed);
+        QVERIFY(engine.publicSnapshot().bottomCards.empty());
+
+        GameCommand bid;
+        bid.type = GameCommandType::Bid;
+        bid.playerId = engine.fullState().currentPlayer;
+        bid.bidValue = 3;
+        QVERIFY(engine.execute(bid).success);
+        QCOMPARE(engine.state().phase(), GamePhase::Playing);
+        QCOMPARE(engine.fullState().players[static_cast<int>(bid.playerId)].hand.size(),
+                 THREE_PLAYER_LANDLORD_TOTAL);
+        QCOMPARE(static_cast<int>(engine.publicSnapshot().bottomCards.size()),
+                 THREE_PLAYER_BOTTOM_CARDS);
+        QCOMPARE(engine.fullState().players[3].role, Role::Undetermined);
+    }
+
+    void testThreePlayerModePersistsAndLegacySaveDefaultsToFour() {
+        GameEngine engine;
+        GameCommand start;
+        start.type = GameCommandType::StartGame;
+        start.randomSeed = 7;
+        start.playerCount = THREE_PLAYER_COUNT;
+        QVERIFY(engine.execute(start).success);
+
+        const auto saved = engine.state().toJson();
+        QCOMPARE(saved["activePlayerCount"].toInt(), THREE_PLAYER_COUNT);
+        const auto restored = GameState::fromJson(saved);
+        QCOMPARE(restored.fullState().activePlayerCount, THREE_PLAYER_COUNT);
+        QCOMPARE(restored.publicSnapshot().activePlayerCount, THREE_PLAYER_COUNT);
+        QCOMPARE(static_cast<int>(restored.fullState().bottomCards.size()),
+                 THREE_PLAYER_BOTTOM_CARDS);
+
+        auto legacy = saved;
+        legacy.remove("activePlayerCount");
+        QCOMPARE(GameState::fromJson(legacy).fullState().activePlayerCount, PLAYER_COUNT);
+    }
+
+    void testThreePlayerBiddingAndTurnOrderNeverUseFourthSeat() {
+        GameEngine engine;
+        GameCommand start;
+        start.type = GameCommandType::StartGame;
+        start.randomSeed = 4;
+        start.playerCount = THREE_PLAYER_COUNT;
+        QVERIFY(engine.execute(start).success);
+        const auto firstGameId = engine.state().gameId();
+
+        for (int count = 0; count < THREE_PLAYER_COUNT; ++count) {
+            QVERIFY(static_cast<int>(engine.fullState().currentPlayer) < THREE_PLAYER_COUNT);
+            GameCommand passBid;
+            passBid.type = GameCommandType::Bid;
+            passBid.playerId = engine.fullState().currentPlayer;
+            passBid.bidValue = 0;
+            QVERIFY(engine.execute(passBid).success);
+        }
+        QVERIFY(engine.state().gameId() != firstGameId);
+        QCOMPARE(engine.fullState().activePlayerCount, THREE_PLAYER_COUNT);
+
+        engine.state().setPhase(GamePhase::Playing);
+        auto& fs = engine.state().fullState();
+        fs.currentPlayer = PlayerId::Player2;
+        fs.lastPlayedBy = PlayerId::Player1;
+        fs.lastPlayedCards = sameRankCards(Rank::Three, 1);
+        fs.consecutivePasses = 0;
+        for (PlayerId player : {PlayerId::Player2, PlayerId::Player3}) {
+            QCOMPARE(fs.currentPlayer, player);
+            GameCommand pass;
+            pass.type = GameCommandType::Pass;
+            pass.playerId = player;
+            QVERIFY(engine.execute(pass).success);
+        }
+        QCOMPARE(fs.currentPlayer, PlayerId::Player1);
+        QVERIFY(fs.lastPlayedCards.empty());
+    }
+
+    void testStartTwoPlayerGameUsesSingleDeckWithSeventeenSetAsideCards() {
+        GameEngine engine;
+        GameCommand start;
+        start.type = GameCommandType::StartGame;
+        start.randomSeed = 19;
+        start.playerCount = TWO_PLAYER_COUNT;
+        const auto result = engine.execute(start);
+        QVERIFY(result.success);
+        QCOMPARE(engine.fullState().activePlayerCount, TWO_PLAYER_COUNT);
+        QCOMPARE(engine.publicSnapshot().activePlayerCount, TWO_PLAYER_COUNT);
+        QCOMPARE(engine.fullState().players[1].seat, SeatPosition::North);
+
+        std::array<bool, TWO_PLAYER_TOTAL_CARDS> seen{};
+        for (int player = 0; player < TWO_PLAYER_COUNT; ++player) {
+            const auto& hand = engine.fullState().players[player].hand;
+            QCOMPARE(hand.size(), TWO_PLAYER_CARDS_PER_PLAYER);
+            for (const auto& card : hand.cards()) {
+                QVERIFY(card.id() < TWO_PLAYER_TOTAL_CARDS);
+                QVERIFY(!seen[card.id()]);
+                seen[card.id()] = true;
+            }
+        }
+        QVERIFY(engine.fullState().players[2].hand.empty());
+        QVERIFY(engine.fullState().players[3].hand.empty());
+        QCOMPARE(static_cast<int>(engine.fullState().bottomCards.size()),
+                 TWO_PLAYER_BOTTOM_CARDS);
+        for (const auto& card : engine.fullState().bottomCards) {
+            QVERIFY(!seen[card.id()]);
+            seen[card.id()] = true;
+        }
+        QCOMPARE(static_cast<int>(std::count(seen.begin(), seen.end(), true)),
+                 TWO_PLAYER_COUNT * TWO_PLAYER_CARDS_PER_PLAYER +
+                     TWO_PLAYER_BOTTOM_CARDS);
+        QCOMPARE(static_cast<int>(std::count(seen.begin(), seen.end(), false)),
+                 TWO_PLAYER_SET_ASIDE_CARDS);
+        QVERIFY(engine.publicSnapshot().bottomCards.empty());
+
+        GameCommand bid;
+        bid.type = GameCommandType::Bid;
+        bid.playerId = engine.fullState().currentPlayer;
+        bid.bidValue = 3;
+        QVERIFY(engine.execute(bid).success);
+        QCOMPARE(engine.fullState().players[static_cast<int>(bid.playerId)].hand.size(),
+                 TWO_PLAYER_LANDLORD_TOTAL);
+        QCOMPARE(static_cast<int>(engine.publicSnapshot().bottomCards.size()),
+                 TWO_PLAYER_BOTTOM_CARDS);
+    }
+
+    void testTwoPlayerBiddingTurnAndPassNeverUseInactiveSeats() {
+        GameEngine engine;
+        GameCommand start;
+        start.type = GameCommandType::StartGame;
+        start.randomSeed = 23;
+        start.playerCount = TWO_PLAYER_COUNT;
+        QVERIFY(engine.execute(start).success);
+        const auto firstGameId = engine.state().gameId();
+
+        for (int count = 0; count < TWO_PLAYER_COUNT; ++count) {
+            QVERIFY(static_cast<int>(engine.fullState().currentPlayer) < TWO_PLAYER_COUNT);
+            GameCommand passBid;
+            passBid.type = GameCommandType::Bid;
+            passBid.playerId = engine.fullState().currentPlayer;
+            passBid.bidValue = 0;
+            QVERIFY(engine.execute(passBid).success);
+        }
+        QVERIFY(engine.state().gameId() != firstGameId);
+        QCOMPARE(engine.fullState().activePlayerCount, TWO_PLAYER_COUNT);
+
+        engine.state().setPhase(GamePhase::Playing);
+        auto& fs = engine.state().fullState();
+        fs.currentPlayer = PlayerId::Player2;
+        fs.lastPlayedBy = PlayerId::Player1;
+        fs.lastPlayedCards = sameRankCards(Rank::Three, 1);
+        fs.consecutivePasses = 0;
+        GameCommand pass;
+        pass.type = GameCommandType::Pass;
+        pass.playerId = PlayerId::Player2;
+        QVERIFY(engine.execute(pass).success);
+        QCOMPARE(fs.currentPlayer, PlayerId::Player1);
+        QVERIFY(fs.lastPlayedCards.empty());
+    }
+
+    void testUnsupportedPlayerCountIsRejected() {
+        GameEngine engine;
+        GameCommand start;
+        start.type = GameCommandType::StartGame;
+        start.playerCount = 1;
+        const auto result = engine.execute(start);
+        QVERIFY(!result.success);
+        QCOMPARE(engine.state().phase(), GamePhase::NotStarted);
+    }
+
+    void testThreePlayerStandardAttachmentDoesNotChangeFourPlayerRules() {
+        const std::vector<Card> tripleWithSingle = {
+            Card::create(Rank::Five, Suit::Spades, 0),
+            Card::create(Rank::Five, Suit::Hearts, 0),
+            Card::create(Rank::Five, Suit::Clubs, 0),
+            Card::create(Rank::Three, Suit::Diamonds, 0)
+        };
+        auto prepare = [&](GameEngine& engine, int activePlayerCount) {
+            engine.state().setPhase(GamePhase::Playing);
+            auto& fs = engine.state().fullState();
+            fs.activePlayerCount = activePlayerCount;
+            fs.currentPlayer = PlayerId::Player1;
+            fs.lastPlayedCards.clear();
+            fs.players[0].hand.clear();
+            fs.players[0].hand.addCards(tripleWithSingle);
+            fs.players[0].hand.addCard(Card::create(Rank::Seven, Suit::Spades, 0));
+        };
+        GameCommand play;
+        play.type = GameCommandType::PlayCards;
+        play.playerId = PlayerId::Player1;
+        play.cardIds = idsOf(tripleWithSingle);
+
+        GameEngine threePlayer;
+        prepare(threePlayer, THREE_PLAYER_COUNT);
+        QVERIFY(threePlayer.execute(play).success);
+
+        GameEngine fourPlayer;
+        prepare(fourPlayer, PLAYER_COUNT);
+        const auto rejected = fourPlayer.execute(play);
+        QVERIFY(!rejected.success);
+        QCOMPARE(rejected.errorCode, ErrorCode::InvalidPattern);
+    }
+
+    void testThreePlayerRocketUsesStandardDoubleMultiplier() {
+        GameEngine engine;
+        engine.state().setPhase(GamePhase::Playing);
+        auto& fs = engine.state().fullState();
+        fs.activePlayerCount = THREE_PLAYER_COUNT;
+        fs.currentPlayer = PlayerId::Player1;
+        fs.lastPlayedCards.clear();
+        fs.players[0].hand.clear();
+        const std::vector<Card> rocket = {
+            Card::create(Rank::SmallJoker, Suit::None, 0),
+            Card::create(Rank::BigJoker, Suit::None, 0)
+        };
+        fs.players[0].hand.addCards(rocket);
+        fs.players[0].hand.addCard(Card::create(Rank::Three, Suit::Spades, 0));
+
+        GameCommand play;
+        play.type = GameCommandType::PlayCards;
+        play.playerId = PlayerId::Player1;
+        play.cardIds = idsOf(rocket);
+        QVERIFY(engine.execute(play).success);
+        QCOMPARE(fs.currentMultiplier, int64_t(2));
+    }
+
     void testPauseResume() {
         GameEngine engine;
         GameCommand startCmd;

@@ -31,8 +31,10 @@ std::wstring roleDisplayName(Role role) {
     return L"未知";
 }
 
-PlayerId nextPlayer(PlayerId current) {
-    return static_cast<PlayerId>((static_cast<uint8_t>(current) + 1) % PLAYER_COUNT);
+PlayerId nextPlayer(PlayerId current, int activePlayerCount) {
+    const int count = isSupportedPlayerCount(activePlayerCount)
+        ? activePlayerCount : PLAYER_COUNT;
+    return static_cast<PlayerId>((static_cast<uint8_t>(current) + 1) % count);
 }
 
 } // namespace fpdz

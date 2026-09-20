@@ -32,9 +32,23 @@ void chooseRanks(const std::vector<Rank>& ranks, int needed, size_t index,
     }
 }
 
+void chooseCards(const std::vector<Card>& cards, int needed, size_t index,
+                 std::vector<Card>& current, std::vector<std::vector<Card>>& output) {
+    if (static_cast<int>(current.size()) == needed) {
+        output.push_back(current);
+        return;
+    }
+    const int stillNeeded = needed - static_cast<int>(current.size());
+    for (size_t i = index; i + static_cast<size_t>(stillNeeded) <= cards.size(); ++i) {
+        current.push_back(cards[i]);
+        chooseCards(cards, needed, i + 1, current, output);
+        current.pop_back();
+    }
+}
+
 void addCandidate(std::vector<LegalMove>& moves, std::set<std::vector<CardId>>& seen,
-                  std::vector<Card> cards) {
-    const auto pattern = PatternAnalyzer::analyze(cards);
+                  std::vector<Card> cards, int activePlayerCount) {
+    const auto pattern = PatternAnalyzer::analyze(cards, activePlayerCount);
     if (!pattern.isValid()) return;
     std::vector<CardId> ids;
     ids.reserve(cards.size());
@@ -45,7 +59,8 @@ void addCandidate(std::vector<LegalMove>& moves, std::set<std::vector<CardId>>& 
 }
 
 void addSequences(std::vector<LegalMove>& moves, std::set<std::vector<CardId>>& seen,
-                  const Groups& groups, int copies, int minimumLength) {
+                  const Groups& groups, int copies, int minimumLength,
+                  int activePlayerCount) {
     const int first = static_cast<int>(Rank::Three);
     const int last = static_cast<int>(Rank::Ace);
     for (int start = first; start <= last; ++start) {
@@ -60,7 +75,7 @@ void addSequences(std::vector<LegalMove>& moves, std::set<std::vector<CardId>>& 
                 }
                 appendCards(cards, selected);
             }
-            if (valid) addCandidate(moves, seen, std::move(cards));
+            if (valid) addCandidate(moves, seen, std::move(cards), activePlayerCount);
         }
     }
 }
@@ -68,23 +83,29 @@ void addSequences(std::vector<LegalMove>& moves, std::set<std::vector<CardId>>& 
 } // namespace
 
 std::vector<LegalMove> LegalMoveGenerator::generateLegalMoves(
-    const Hand& hand, const std::optional<CardPattern>& lastPlay) {
+    const Hand& hand, const std::optional<CardPattern>& lastPlay,
+    int activePlayerCount) {
     std::vector<LegalMove> allMoves;
     std::set<std::vector<CardId>> seen;
     const auto groups = hand.groupByRank();
 
     for (const auto& [rank, cards] : groups) {
         (void)rank;
-        addCandidate(allMoves, seen, {cards.front()});
+        addCandidate(allMoves, seen, {cards.front()}, activePlayerCount);
         if (cards.size() >= 2) {
-            addCandidate(allMoves, seen, std::vector<Card>(cards.begin(), cards.begin() + 2));
+            addCandidate(allMoves, seen,
+                         std::vector<Card>(cards.begin(), cards.begin() + 2),
+                         activePlayerCount);
         }
         if (cards.size() >= 3) {
-            addCandidate(allMoves, seen, std::vector<Card>(cards.begin(), cards.begin() + 3));
+            addCandidate(allMoves, seen,
+                         std::vector<Card>(cards.begin(), cards.begin() + 3),
+                         activePlayerCount);
         }
         for (int count = 4; count <= static_cast<int>(cards.size()) && count <= 8; ++count) {
             addCandidate(allMoves, seen,
-                         std::vector<Card>(cards.begin(), cards.begin() + count));
+                         std::vector<Card>(cards.begin(), cards.begin() + count),
+                         activePlayerCount);
         }
     }
 
@@ -96,17 +117,26 @@ std::vector<LegalMove> LegalMoveGenerator::generateLegalMoves(
     }
 
     for (const auto tripleRank : tripleRanks) {
+        if (activePlayerCount == TWO_PLAYER_COUNT ||
+            activePlayerCount == THREE_PLAYER_COUNT) {
+            for (const auto& [singleRank, singleCards] : groups) {
+                if (singleRank == tripleRank) continue;
+                auto cards = takeCards(groups, tripleRank, 3);
+                cards.push_back(singleCards.front());
+                addCandidate(allMoves, seen, std::move(cards), activePlayerCount);
+            }
+        }
         for (const auto pairRank : pairRanks) {
             if (pairRank == tripleRank) continue;
             auto cards = takeCards(groups, tripleRank, 3);
             appendCards(cards, takeCards(groups, pairRank, 2));
-            addCandidate(allMoves, seen, std::move(cards));
+            addCandidate(allMoves, seen, std::move(cards), activePlayerCount);
         }
     }
 
-    addSequences(allMoves, seen, groups, 1, 5);
-    addSequences(allMoves, seen, groups, 2, 3);
-    addSequences(allMoves, seen, groups, 3, 2);
+    addSequences(allMoves, seen, groups, 1, 5, activePlayerCount);
+    addSequences(allMoves, seen, groups, 2, 3, activePlayerCount);
+    addSequences(allMoves, seen, groups, 3, 2, activePlayerCount);
 
     const int first = static_cast<int>(Rank::Three);
     const int last = static_cast<int>(Rank::Ace);
@@ -127,6 +157,22 @@ std::vector<LegalMove> LegalMoveGenerator::generateLegalMoves(
             }
             if (!validBody) break;
 
+            if (activePlayerCount == TWO_PLAYER_COUNT ||
+                activePlayerCount == THREE_PLAYER_COUNT) {
+                std::vector<Card> singleWings;
+                for (const auto& [rank, cards] : groups) {
+                    if (!bodyRanks.contains(rank)) appendCards(singleWings, cards);
+                }
+                std::vector<std::vector<Card>> singleChoices;
+                std::vector<Card> currentCards;
+                chooseCards(singleWings, length, 0, currentCards, singleChoices);
+                for (const auto& choice : singleChoices) {
+                    auto cards = body;
+                    appendCards(cards, choice);
+                    addCandidate(allMoves, seen, std::move(cards), activePlayerCount);
+                }
+            }
+
             std::vector<Rank> wingRanks;
             for (const auto rank : pairRanks) {
                 const int requiredCards = bodyRanks.contains(rank) ? 5 : 2;
@@ -144,7 +190,41 @@ std::vector<LegalMove> LegalMoveGenerator::generateLegalMoves(
                     appendCards(cards, takeCards(groups, rank, 2,
                         bodyRanks.contains(rank) ? 3 : 0));
                 }
-                addCandidate(allMoves, seen, std::move(cards));
+                addCandidate(allMoves, seen, std::move(cards), activePlayerCount);
+            }
+        }
+    }
+
+    if (activePlayerCount == TWO_PLAYER_COUNT ||
+        activePlayerCount == THREE_PLAYER_COUNT) {
+        for (const auto& [fourRank, fourCards] : groups) {
+            if (fourCards.size() < 4) continue;
+            std::vector<Card> wings;
+            for (const auto& [rank, cards] : groups) {
+                if (rank != fourRank) appendCards(wings, cards);
+            }
+            std::vector<std::vector<Card>> singleChoices;
+            std::vector<Card> currentCards;
+            chooseCards(wings, 2, 0, currentCards, singleChoices);
+            for (const auto& choice : singleChoices) {
+                auto cards = takeCards(groups, fourRank, 4);
+                appendCards(cards, choice);
+                addCandidate(allMoves, seen, std::move(cards), activePlayerCount);
+            }
+
+            std::vector<Rank> availablePairs;
+            for (const auto rank : pairRanks) {
+                if (rank != fourRank) availablePairs.push_back(rank);
+            }
+            std::vector<std::vector<Rank>> pairChoices;
+            std::vector<Rank> currentRanks;
+            chooseRanks(availablePairs, 2, 0, currentRanks, pairChoices);
+            for (const auto& choice : pairChoices) {
+                auto cards = takeCards(groups, fourRank, 4);
+                for (const auto rank : choice) {
+                    appendCards(cards, takeCards(groups, rank, 2));
+                }
+                addCandidate(allMoves, seen, std::move(cards), activePlayerCount);
             }
         }
     }
@@ -152,14 +232,15 @@ std::vector<LegalMove> LegalMoveGenerator::generateLegalMoves(
     const auto oneSmallJoker = takeCards(groups, Rank::SmallJoker, 1);
     const auto oneBigJoker = takeCards(groups, Rank::BigJoker, 1);
     if (!oneSmallJoker.empty() && !oneBigJoker.empty()) {
-        addCandidate(allMoves, seen, {oneSmallJoker.front(), oneBigJoker.front()});
+        addCandidate(allMoves, seen, {oneSmallJoker.front(), oneBigJoker.front()},
+                     activePlayerCount);
     }
     const auto smallJokers = takeCards(groups, Rank::SmallJoker, 2);
     const auto bigJokers = takeCards(groups, Rank::BigJoker, 2);
     if (smallJokers.size() == 2 && bigJokers.size() == 2) {
         auto cards = smallJokers;
         appendCards(cards, bigJokers);
-        addCandidate(allMoves, seen, std::move(cards));
+        addCandidate(allMoves, seen, std::move(cards), activePlayerCount);
     }
 
     if (lastPlay.has_value()) {
@@ -177,16 +258,21 @@ std::vector<LegalMove> LegalMoveGenerator::generateLegalMoves(
     return allMoves;
 }
 
-std::vector<std::vector<Card>> LegalMoveGenerator::generateFreePlayMoves(const Hand& hand) {
+std::vector<std::vector<Card>> LegalMoveGenerator::generateFreePlayMoves(
+    const Hand& hand, int activePlayerCount) {
     std::vector<std::vector<Card>> moves;
-    for (auto& move : generateLegalMoves(hand)) moves.push_back(std::move(move.cards));
+    for (auto& move : generateLegalMoves(hand, std::nullopt, activePlayerCount)) {
+        moves.push_back(std::move(move.cards));
+    }
     return moves;
 }
 
 std::vector<std::vector<Card>> LegalMoveGenerator::generateResponseMoves(
-    const Hand& hand, const CardPattern& lastPlay) {
+    const Hand& hand, const CardPattern& lastPlay, int activePlayerCount) {
     std::vector<std::vector<Card>> moves;
-    for (auto& move : generateLegalMoves(hand, lastPlay)) moves.push_back(std::move(move.cards));
+    for (auto& move : generateLegalMoves(hand, lastPlay, activePlayerCount)) {
+        moves.push_back(std::move(move.cards));
+    }
     return moves;
 }
 

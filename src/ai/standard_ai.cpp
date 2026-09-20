@@ -69,8 +69,8 @@ GameCommand StandardAiPlayer::decideBid(const AiObservation& observation) {
     command.playerId = observation.playerId;
     command.bidValue = BiddingStrategy::decideBid(
         observation.ownHand, observation.highestBid, m_profile.level,
-        observation.decisionSeed);
-    command.aiDecisionReason = "bid_from_own_25_cards";
+        observation.decisionSeed, observation.publicState.activePlayerCount);
+    command.aiDecisionReason = "bid_from_own_hand";
     return command;
 }
 
@@ -80,9 +80,12 @@ GameCommand StandardAiPlayer::decidePlay(const AiObservation& observation) {
     const bool isLeader = observation.publicState.lastPlayedCards.empty();
     std::optional<CardPattern> lastPattern;
     if (!isLeader) {
-        lastPattern = PatternAnalyzer::analyze(observation.publicState.lastPlayedCards);
+        lastPattern = PatternAnalyzer::analyze(
+            observation.publicState.lastPlayedCards,
+            observation.publicState.activePlayerCount);
     }
-    const auto moves = LegalMoveGenerator::generateLegalMoves(observation.ownHand, lastPattern);
+    const auto moves = LegalMoveGenerator::generateLegalMoves(
+        observation.ownHand, lastPattern, observation.publicState.activePlayerCount);
     if (moves.empty()) {
         command.type = GameCommandType::Pass;
         command.aiDecisionReason = "no_legal_move";
@@ -148,7 +151,8 @@ GameCommand StandardAiPlayer::decidePlay(const AiObservation& observation) {
         if (move.pattern.isBomb() && !remaining.empty()) score -= kPolicy.normalBombPenalty;
 
         if (std::chrono::steady_clock::now() < deadline && !remaining.empty()) {
-            const auto followUps = LegalMoveGenerator::generateLegalMoves(remaining);
+            const auto followUps = LegalMoveGenerator::generateLegalMoves(
+                remaining, std::nullopt, observation.publicState.activePlayerCount);
             score -= static_cast<int>(followUps.size()) * kPolicy.followUpPenalty;
             int largest = 0;
             int examined = 0;

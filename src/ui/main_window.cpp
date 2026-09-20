@@ -4,6 +4,7 @@
 #include "widgets/game_status_widget.h"
 #include "widgets/card_table_widget.h"
 #include "dialogs/settings_dialog.h"
+#include "dialogs/shortcut_dialog.h"
 #include "dialogs/sound_manager_dialog.h"
 #include "dialogs/result_dialog.h"
 #include "../core/engine/game_engine.h"
@@ -62,6 +63,7 @@
 #include <QSignalBlocker>
 #include <algorithm>
 #include <array>
+#include <utility>
 
 #ifdef Q_OS_WIN
 #ifndef WIN32_LEAN_AND_MEAN
@@ -233,6 +235,127 @@ bool g_altDown = false;
 std::array<bool, 256> g_singleFireKeyDown{};
 std::array<bool, 256> g_traceKeyDown{};
 int g_openMenuCount = 0;
+ShortcutSettings g_activeShortcuts;
+
+int qtKeyFromVirtualKey(DWORD virtualKey) {
+    if (virtualKey >= 'A' && virtualKey <= 'Z') {
+        return Qt::Key_A + static_cast<int>(virtualKey - 'A');
+    }
+    if (virtualKey >= '0' && virtualKey <= '9') {
+        return Qt::Key_0 + static_cast<int>(virtualKey - '0');
+    }
+    if (virtualKey >= VK_NUMPAD0 && virtualKey <= VK_NUMPAD9) {
+        return Qt::Key_0 + static_cast<int>(virtualKey - VK_NUMPAD0);
+    }
+    if (virtualKey >= VK_F1 && virtualKey <= VK_F24) {
+        return Qt::Key_F1 + static_cast<int>(virtualKey - VK_F1);
+    }
+    switch (virtualKey) {
+    case VK_LEFT: return Qt::Key_Left;
+    case VK_RIGHT: return Qt::Key_Right;
+    case VK_UP: return Qt::Key_Up;
+    case VK_DOWN: return Qt::Key_Down;
+    case VK_HOME: return Qt::Key_Home;
+    case VK_END: return Qt::Key_End;
+    case VK_PRIOR: return Qt::Key_PageUp;
+    case VK_NEXT: return Qt::Key_PageDown;
+    case VK_INSERT: return Qt::Key_Insert;
+    case VK_DELETE: return Qt::Key_Delete;
+    case VK_BACK: return Qt::Key_Backspace;
+    case VK_RETURN: return Qt::Key_Return;
+    case VK_TAB: return Qt::Key_Tab;
+    case VK_SPACE: return Qt::Key_Space;
+    case VK_ESCAPE: return Qt::Key_Escape;
+    case VK_CAPITAL: return Qt::Key_CapsLock;
+    case VK_NUMLOCK: return Qt::Key_NumLock;
+    case VK_SCROLL: return Qt::Key_ScrollLock;
+    case VK_PAUSE: return Qt::Key_Pause;
+    case VK_SNAPSHOT: return Qt::Key_Print;
+    case VK_SUBTRACT: case VK_OEM_MINUS: return Qt::Key_Minus;
+    case VK_ADD: case VK_OEM_PLUS: return Qt::Key_Plus;
+    case VK_MULTIPLY: return Qt::Key_Asterisk;
+    case VK_DIVIDE: case VK_OEM_2: return Qt::Key_Slash;
+    case VK_OEM_COMMA: return Qt::Key_Comma;
+    case VK_OEM_PERIOD: return Qt::Key_Period;
+    case VK_OEM_1: return Qt::Key_Semicolon;
+    case VK_OEM_3: return Qt::Key_QuoteLeft;
+    case VK_OEM_4: return Qt::Key_BracketLeft;
+    case VK_OEM_5: return Qt::Key_Backslash;
+    case VK_OEM_6: return Qt::Key_BracketRight;
+    case VK_OEM_7: return Qt::Key_Apostrophe;
+    default: return 0;
+    }
+}
+
+ShortcutBinding shortcutFromVirtualKey(DWORD virtualKey, bool ctrlDown,
+                                        bool shiftDown, bool altDown) {
+    Qt::KeyboardModifiers modifiers = Qt::NoModifier;
+    if (ctrlDown) modifiers |= Qt::ControlModifier;
+    if (shiftDown) modifiers |= Qt::ShiftModifier;
+    if (altDown) modifiers |= Qt::AltModifier;
+    if ((virtualKey >= VK_NUMPAD0 && virtualKey <= VK_NUMPAD9) ||
+        virtualKey == VK_ADD || virtualKey == VK_SUBTRACT ||
+        virtualKey == VK_MULTIPLY || virtualKey == VK_DIVIDE) {
+        modifiers |= Qt::KeypadModifier;
+    }
+    int key = qtKeyFromVirtualKey(virtualKey);
+    if (virtualKey == VK_OEM_PLUS && !shiftDown) key = Qt::Key_Equal;
+    return ShortcutSettings::fromKeyEvent(key, modifiers);
+}
+
+UINT virtualKeyFromShortcut(const ShortcutBinding& binding) {
+    const int key = binding.key;
+    const bool keypad = binding.modifiers.testFlag(Qt::KeypadModifier);
+    if (key >= Qt::Key_A && key <= Qt::Key_Z) return 'A' + key - Qt::Key_A;
+    if (key >= Qt::Key_0 && key <= Qt::Key_9) {
+        return keypad ? VK_NUMPAD0 + key - Qt::Key_0 : '0' + key - Qt::Key_0;
+    }
+    if (key >= Qt::Key_F1 && key <= Qt::Key_F24) return VK_F1 + key - Qt::Key_F1;
+    switch (key) {
+    case Qt::Key_Left: return VK_LEFT;
+    case Qt::Key_Right: return VK_RIGHT;
+    case Qt::Key_Up: return VK_UP;
+    case Qt::Key_Down: return VK_DOWN;
+    case Qt::Key_Home: return VK_HOME;
+    case Qt::Key_End: return VK_END;
+    case Qt::Key_PageUp: return VK_PRIOR;
+    case Qt::Key_PageDown: return VK_NEXT;
+    case Qt::Key_Insert: return VK_INSERT;
+    case Qt::Key_Delete: return VK_DELETE;
+    case Qt::Key_Backspace: return VK_BACK;
+    case Qt::Key_Return: return VK_RETURN;
+    case Qt::Key_Tab: return VK_TAB;
+    case Qt::Key_Space: return VK_SPACE;
+    case Qt::Key_Escape: return VK_ESCAPE;
+    case Qt::Key_CapsLock: return VK_CAPITAL;
+    case Qt::Key_NumLock: return VK_NUMLOCK;
+    case Qt::Key_ScrollLock: return VK_SCROLL;
+    case Qt::Key_Pause: return VK_PAUSE;
+    case Qt::Key_Print: return VK_SNAPSHOT;
+    case Qt::Key_Minus: return keypad ? VK_SUBTRACT : VK_OEM_MINUS;
+    case Qt::Key_Plus: return keypad ? VK_ADD : VK_OEM_PLUS;
+    case Qt::Key_Equal: return VK_OEM_PLUS;
+    case Qt::Key_Asterisk: return VK_MULTIPLY;
+    case Qt::Key_Slash: return keypad ? VK_DIVIDE : VK_OEM_2;
+    case Qt::Key_Comma: return VK_OEM_COMMA;
+    case Qt::Key_Period: return VK_OEM_PERIOD;
+    case Qt::Key_Semicolon: return VK_OEM_1;
+    case Qt::Key_QuoteLeft: return VK_OEM_3;
+    case Qt::Key_BracketLeft: return VK_OEM_4;
+    case Qt::Key_Backslash: return VK_OEM_5;
+    case Qt::Key_BracketRight: return VK_OEM_6;
+    case Qt::Key_Apostrophe: return VK_OEM_7;
+    default: return 0;
+    }
+}
+
+UINT nativeModifiersFromShortcut(const ShortcutBinding& binding) {
+    UINT modifiers = MOD_NOREPEAT;
+    if (binding.modifiers.testFlag(Qt::ControlModifier)) modifiers |= MOD_CONTROL;
+    if (binding.modifiers.testFlag(Qt::ShiftModifier)) modifiers |= MOD_SHIFT;
+    if (binding.modifiers.testFlag(Qt::AltModifier)) modifiers |= MOD_ALT;
+    return modifiers;
+}
 
 bool isControlDown() {
     return g_controlDown ||
@@ -278,38 +401,21 @@ bool shouldYieldKeyboardHandlingToFocusedWidget() {
            (qobject_cast<QMenuBar*>(focusWidget) || qobject_cast<QMenu*>(focusWidget));
 }
 
-bool isKeyboardHookCandidate(DWORD virtualKey, bool altDown) {
-    if (altDown) {
-        return virtualKey == 'F' || virtualKey == 'X';
-    }
-
-    switch (virtualKey) {
-    case VK_F1:
-    case VK_F2:
-    case VK_F5:
-    case VK_F11:
-    case VK_F12:
-    case VK_LEFT:
-    case VK_RIGHT:
-    case VK_HOME:
-    case VK_END:
-    case VK_UP:
-    case VK_DOWN:
-    case VK_RETURN:
-    case VK_SPACE:
-        return true;
-    default:
-        return virtualKey >= '0' && virtualKey <= '4';
-    }
+bool isKeyboardHookCandidate(DWORD virtualKey, bool ctrlDown,
+                             bool shiftDown, bool altDown) {
+    return g_activeShortcuts.actionFor(
+        shortcutFromVirtualKey(virtualKey, ctrlDown, shiftDown, altDown)).has_value();
 }
 
-bool isSingleFireKey(DWORD virtualKey) {
-    return virtualKey == VK_F1 || virtualKey == VK_F2 || virtualKey == VK_F5 ||
-           virtualKey == VK_F11 || virtualKey == VK_F12 ||
-           virtualKey == VK_HOME || virtualKey == VK_END ||
-           virtualKey == VK_UP || virtualKey == VK_DOWN ||
-           virtualKey == VK_RETURN || virtualKey == VK_SPACE ||
-           (virtualKey >= '1' && virtualKey <= '4');
+bool isSingleFireKey(DWORD virtualKey, bool ctrlDown = false,
+                     bool shiftDown = false, bool altDown = false) {
+    const auto action = g_activeShortcuts.actionFor(
+        shortcutFromVirtualKey(virtualKey, ctrlDown, shiftDown, altDown));
+    if (!action) return false;
+    return *action != ShortcutAction::PreviousRankGroup &&
+           *action != ShortcutAction::NextRankGroup &&
+           *action != ShortcutAction::PreviousCard &&
+           *action != ShortcutAction::NextCard;
 }
 
 LRESULT CALLBACK lowLevelKeyboardProc(int code, WPARAM wParam, LPARAM lParam) {
@@ -372,75 +478,30 @@ LRESULT CALLBACK lowLevelKeyboardProc(int code, WPARAM wParam, LPARAM lParam) {
         return 1;
     }
 
-    const bool plainF1 = keyDown && key->vkCode == VK_F1 &&
-        !isControlDown() && !isShiftDown() && !isAltDown();
-    if (plainF1 && isKeyboardHookForeground()) {
-        if (!g_f1Down) {
-            g_f1Down = true;
-            const LPARAM flags =
-                (static_cast<LPARAM>(key->scanCode & 0xFF) << kHookScanShift);
-            PostMessageW(g_keyboardHookWindow, kKeyboardHookMessage, key->vkCode, flags);
-        }
-        return CallNextHookEx(g_keyboardHook, code, wParam, lParam);
-    }
-
-    const bool plainF2 = keyDown && key->vkCode == VK_F2 &&
-        !isControlDown() && !isShiftDown() && !isAltDown();
-    if (plainF2 && isKeyboardHookForeground()) {
-        if (!g_singleFireKeyDown[VK_F2]) {
-            g_singleFireKeyDown[VK_F2] = true;
-            const LPARAM flags =
-                (static_cast<LPARAM>(key->scanCode & 0xFF) << kHookScanShift);
-            PostMessageW(g_keyboardHookWindow, kKeyboardHookMessage, key->vkCode, flags);
-        }
-        return 1;
-    }
-
-    const bool plainF5 = keyDown && key->vkCode == VK_F5 &&
-        !isControlDown() && !isShiftDown() && !isAltDown();
-    if (plainF5 && isKeyboardHookForeground()) {
-        if (!g_singleFireKeyDown[VK_F5]) {
-            g_singleFireKeyDown[VK_F5] = true;
-            const LPARAM flags =
-                (static_cast<LPARAM>(key->scanCode & 0xFF) << kHookScanShift);
-            PostMessageW(g_keyboardHookWindow, kKeyboardHookMessage, key->vkCode, flags);
-        }
-        return 1;
-    }
-
-    const bool plainF11 = keyDown && key->vkCode == VK_F11 &&
-        !isControlDown() && !isShiftDown() && !isAltDown();
-    if (plainF11 && isKeyboardHookForeground()) {
-        if (!g_singleFireKeyDown[VK_F11]) {
-            g_singleFireKeyDown[VK_F11] = true;
-            const LPARAM flags =
-                (static_cast<LPARAM>(key->scanCode & 0xFF) << kHookScanShift);
-            PostMessageW(g_keyboardHookWindow, kKeyboardHookMessage, key->vkCode, flags);
-        }
-        return 1;
-    }
-
-    if (shouldYieldKeyboardHandlingToFocusedWidget() || !isKeyboardHookForeground() ||
+    const bool ctrlDown = isControlDown();
+    const bool shiftDown = isShiftDown();
+    const bool altDown = isAltDown() || wParam == WM_SYSKEYDOWN;
+    const auto configuredAction = g_activeShortcuts.actionFor(
+        shortcutFromVirtualKey(key->vkCode, ctrlDown, shiftDown, altDown));
+    const bool menuCompatibleAction = configuredAction &&
+        (*configuredAction == ShortcutAction::Battle ||
+         *configuredAction == ShortcutAction::BottomCards ||
+         *configuredAction == ShortcutAction::OpenSettings ||
+         *configuredAction == ShortcutAction::CurrentTurn);
+    if ((!menuCompatibleAction && shouldYieldKeyboardHandlingToFocusedWidget()) ||
+        !isKeyboardHookForeground() ||
         (wParam != WM_KEYDOWN && wParam != WM_SYSKEYDOWN)) {
         return CallNextHookEx(g_keyboardHook, code, wParam, lParam);
     }
 
-    const bool ctrlDown = isControlDown();
-    const bool shiftDown = isShiftDown();
-    const bool altDown = isAltDown() || wParam == WM_SYSKEYDOWN;
-    if ((key->vkCode == VK_RETURN && (shiftDown || altDown)) ||
-        (key->vkCode == VK_SPACE && (ctrlDown || shiftDown || altDown))) {
-        return CallNextHookEx(g_keyboardHook, code, wParam, lParam);
-    }
-    if (!isKeyboardHookCandidate(key->vkCode, altDown)) {
+    if (!isKeyboardHookCandidate(key->vkCode, ctrlDown, shiftDown, altDown)) {
         return CallNextHookEx(g_keyboardHook, code, wParam, lParam);
     }
 
-    if (isSingleFireKey(key->vkCode) && key->vkCode < g_singleFireKeyDown.size()) {
+    if (isSingleFireKey(key->vkCode, ctrlDown, shiftDown, altDown) &&
+        key->vkCode < g_singleFireKeyDown.size()) {
         if (g_singleFireKeyDown[key->vkCode]) {
-            return key->vkCode == VK_F1
-                ? CallNextHookEx(g_keyboardHook, code, wParam, lParam)
-                : 1;
+            return 1;
         }
         g_singleFireKeyDown[key->vkCode] = true;
     }
@@ -573,27 +634,27 @@ void MainWindow::setupMenus() {
     };
     trackMenu(gameMenu);
     auto* newAction = gameMenu->addAction(QString::fromStdWString(L"开战/停战/恢复(&B)"));
-    newAction->setShortcut(QKeySequence(Qt::Key_F1));
+    m_battleAction = newAction;
+    newAction->setShortcut(ShortcutSettings::keySequence(
+        m_settings.shortcuts.binding(ShortcutAction::Battle)));
     newAction->setShortcutContext(Qt::ApplicationShortcut);
     connect(newAction, &QAction::triggered, this, &MainWindow::triggerBattleShortcut);
 
     auto* pauseAction = gameMenu->addAction(QString::fromStdWString(L"暂停/恢复(&P)"));
-    pauseAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_P));
+    m_pauseAction = pauseAction;
+    pauseAction->setShortcut(ShortcutSettings::keySequence(
+        m_settings.shortcuts.binding(ShortcutAction::PauseResume)));
     connect(pauseAction, &QAction::triggered, this, [this]() {
-        GameCommand cmd;
-        if (m_engine.state().phase() == GamePhase::Playing) {
-            cmd.type = GameCommandType::Pause;
-        } else if (m_engine.state().phase() == GamePhase::Paused) {
-            cmd.type = GameCommandType::Resume;
-        }
-        m_engine.execute(cmd);
-        refreshFromState();
+        triggerShortcutAction(ShortcutAction::PauseResume,
+                              QStringLiteral("menu_action"));
     });
 
     gameMenu->addSeparator();
 
     auto* quitAction = gameMenu->addAction(QString::fromStdWString(L"退出(&Q)"));
-    quitAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_Q));
+    m_quitAction = quitAction;
+    quitAction->setShortcut(ShortcutSettings::keySequence(
+        m_settings.shortcuts.binding(ShortcutAction::ExitApplication)));
     connect(quitAction, &QAction::triggered, this, &QWidget::close);
 
     auto* settingsMenu = menuBar()->addMenu(QString::fromStdWString(L"设置(S)"));
@@ -658,7 +719,9 @@ void MainWindow::setupMenus() {
     });
 
     auto* settingsAction = settingsMenu->addAction(QString::fromStdWString(L"设置选项(&O)"));
-    settingsAction->setShortcut(QKeySequence(Qt::Key_F5));
+    m_settingsAction = settingsAction;
+    settingsAction->setShortcut(ShortcutSettings::keySequence(
+        m_settings.shortcuts.binding(ShortcutAction::OpenSettings)));
     settingsAction->setShortcutContext(Qt::ApplicationShortcut);
     connect(settingsAction, &QAction::triggered, this, &MainWindow::openSettingsDialog);
 
@@ -716,6 +779,12 @@ void MainWindow::setupMenus() {
     auto* donateAction = helpMenu->addAction(QString::fromUtf8(u8"喜欢作者(&L)"));
     donateAction->setObjectName(QStringLiteral("donateAction"));
     connect(donateAction, &QAction::triggered, this, &MainWindow::showDonateDialog);
+
+    auto* shortcutSettingsAction = menuBar()->addAction(
+        QString::fromUtf8(u8"快捷键设置"));
+    shortcutSettingsAction->setObjectName(QStringLiteral("shortcutSettingsMenuAction"));
+    connect(shortcutSettingsAction, &QAction::triggered,
+            this, &MainWindow::openShortcutDialog);
 }
 
 void MainWindow::openTopLevelMenu(QMenu* menu) {
@@ -901,20 +970,6 @@ void MainWindow::setupShortcuts() {
         shortcut->setContext(Qt::ApplicationShortcut);
         connect(shortcut, &QShortcut::activated, this, slot);
     };
-
-    addApplicationShortcut(QKeySequence(Qt::Key_F11), [this]() {
-        announceCurrentTurn();
-    });
-    addApplicationShortcut(QKeySequence(Qt::Key_F12), [this]() {
-        announceLastAction();
-    });
-    addApplicationShortcut(QKeySequence(Qt::Key_F2), [this]() {
-        triggerBottomCardsShortcut(QStringLiteral("qt_shortcut"));
-    });
-    addApplicationShortcut(QKeySequence(Qt::ALT | Qt::Key_F), [this]() {
-        dismissMenusForGameAction();
-        announceScore();
-    });
     addApplicationShortcut(QKeySequence(Qt::Key_Tab), [this]() {
         if (isHumanBiddingTurn()) {
             cycleBiddingControlFocus(false);
@@ -933,13 +988,54 @@ void MainWindow::setupShortcuts() {
             setFocus(Qt::BacktabFocusReason);
         }
     });
+    applyShortcutBindings();
+}
 
+void MainWindow::applyShortcutBindings() {
+    if (m_battleAction) {
+        m_battleAction->setShortcut(ShortcutSettings::keySequence(
+            m_settings.shortcuts.binding(ShortcutAction::Battle)));
+    }
+    if (m_pauseAction) {
+        m_pauseAction->setShortcut(ShortcutSettings::keySequence(
+            m_settings.shortcuts.binding(ShortcutAction::PauseResume)));
+    }
+    if (m_quitAction) {
+        m_quitAction->setShortcut(ShortcutSettings::keySequence(
+            m_settings.shortcuts.binding(ShortcutAction::ExitApplication)));
+    }
+    if (m_settingsAction) {
+        m_settingsAction->setShortcut(ShortcutSettings::keySequence(
+            m_settings.shortcuts.binding(ShortcutAction::OpenSettings)));
+    }
+
+    for (auto* shortcut : std::as_const(m_applicationShortcuts)) {
+        delete shortcut;
+    }
+    m_applicationShortcuts.clear();
+    const std::array<ShortcutAction, 4> compatibilityActions = {
+        ShortcutAction::BottomCards, ShortcutAction::CurrentTurn,
+        ShortcutAction::LastAction, ShortcutAction::Score};
+    for (ShortcutAction action : compatibilityActions) {
+        auto* shortcut = new QShortcut(
+            ShortcutSettings::keySequence(m_settings.shortcuts.binding(action)), this);
+        shortcut->setContext(Qt::ApplicationShortcut);
+        connect(shortcut, &QShortcut::activated, this, [this, action]() {
+            triggerShortcutAction(action, QStringLiteral("qt_shortcut"));
+        });
+        m_applicationShortcuts.append(shortcut);
+    }
+#ifdef Q_OS_WIN
+    g_activeShortcuts = m_settings.shortcuts;
+#endif
+    registerSystemHotkeys();
 }
 
 void MainWindow::startNewGame() {
     resumeHandAccessibilityForUserAction();
     GameCommand cmd;
     cmd.type = GameCommandType::StartGame;
+    cmd.playerCount = m_settings.playerCount;
     auto result = m_engine.execute(cmd);
     if (result.success) {
         applyPlayerDisplayNamesToState();
@@ -1011,7 +1107,8 @@ void MainWindow::refreshFromState(int preferredHandRow, bool restoreHandFocusSil
     m_gameInfoLabel->setAccessibleName(QString::fromStdWString(info));
 
     const bool showBottomCards = snap.bottomCardsRevealed &&
-        snap.bottomCards.size() == BOTTOM_CARDS;
+        snap.bottomCards.size() ==
+            static_cast<size_t>(bottomCardsForPlayerCount(snap.activePlayerCount));
     if (m_bottomCardsLabel) {
         if (showBottomCards) {
             const QString bottomCardsText = QString::fromStdWString(
@@ -1483,27 +1580,9 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event) {
             return QMainWindow::eventFilter(watched, event);
         }
         auto* keyEvent = static_cast<QKeyEvent*>(event);
-        const bool keypadKey = keyEvent->modifiers().testFlag(Qt::KeypadModifier);
-        const auto modifiers = keyEvent->modifiers() & ~Qt::KeypadModifier;
-        const bool altQuery = (modifiers == Qt::AltModifier) &&
-            (keyEvent->key() == Qt::Key_D || keyEvent->key() == Qt::Key_F);
-        const bool playerQuery = !keypadKey && modifiers == Qt::NoModifier &&
-            keyEvent->key() >= Qt::Key_1 && keyEvent->key() <= Qt::Key_4;
-        const bool primaryShortcut =
-            keyEvent->key() == Qt::Key_F1 ||
-            keyEvent->key() == Qt::Key_F5 ||
-            keyEvent->key() == Qt::Key_F11 ||
-            keyEvent->key() == Qt::Key_F12 ||
-            keyEvent->key() == Qt::Key_Left ||
-            keyEvent->key() == Qt::Key_Right ||
-            keyEvent->key() == Qt::Key_Home ||
-            keyEvent->key() == Qt::Key_End ||
-            keyEvent->key() == Qt::Key_Up ||
-            keyEvent->key() == Qt::Key_Down ||
-            keyEvent->key() == Qt::Key_Return ||
-            keyEvent->key() == Qt::Key_Enter ||
-            (keyEvent->key() >= Qt::Key_0 && keyEvent->key() <= Qt::Key_3);
-        if (altQuery || playerQuery || primaryShortcut) {
+        const auto binding = ShortcutSettings::fromKeyEvent(
+            keyEvent->key(), keyEvent->modifiers());
+        if (m_settings.shortcuts.actionFor(binding)) {
             keyEvent->accept();
         }
         return QMainWindow::eventFilter(watched, event);
@@ -1561,63 +1640,46 @@ bool MainWindow::handleWindowsMessage(void* message, qintptr* result) {
         return true;
     }
 
-    if (msg && msg->message == kKeyboardHookMessage &&
-        static_cast<unsigned int>(msg->wParam) == VK_F1 &&
-        (msg->lParam & (kHookCtrlFlag | kHookShiftFlag | kHookAltFlag)) == 0) {
-        if (QApplication::activeModalWidget() && QApplication::activeModalWidget() != this) {
-            return false;
+    if (msg && msg->message == kKeyboardHookMessage) {
+        const LPARAM flags = msg->lParam;
+        const auto action = m_settings.shortcuts.actionFor(shortcutFromVirtualKey(
+            static_cast<unsigned int>(msg->wParam),
+            (flags & kHookCtrlFlag) != 0,
+            (flags & kHookShiftFlag) != 0,
+            (flags & kHookAltFlag) != 0));
+        const bool menuCompatibleAction = action &&
+            (*action == ShortcutAction::Battle ||
+             *action == ShortcutAction::BottomCards ||
+             *action == ShortcutAction::OpenSettings ||
+             *action == ShortcutAction::CurrentTurn);
+        if (menuCompatibleAction) {
+            if (QApplication::activeModalWidget() &&
+                QApplication::activeModalWidget() != this) {
+                return false;
+            }
+            if (triggerShortcutAction(*action, QStringLiteral("physical_hook_message"))) {
+                if (result) *result = 1;
+                return true;
+            }
         }
-        triggerBattleShortcut();
-        if (result) *result = 1;
-        return true;
-    }
-
-    if (msg && msg->message == kKeyboardHookMessage &&
-        static_cast<unsigned int>(msg->wParam) == VK_F11 &&
-        (msg->lParam & (kHookCtrlFlag | kHookShiftFlag | kHookAltFlag)) == 0) {
-        if (QApplication::activeModalWidget() && QApplication::activeModalWidget() != this) {
-            return false;
-        }
-        announceCurrentTurn();
-        if (result) *result = 1;
-        return true;
-    }
-
-    if (msg && msg->message == kKeyboardHookMessage &&
-        static_cast<unsigned int>(msg->wParam) == VK_F2 &&
-        (msg->lParam & (kHookCtrlFlag | kHookShiftFlag | kHookAltFlag)) == 0) {
-        if (!triggerBottomCardsShortcut(QStringLiteral("physical_hook_message"))) {
-            return false;
-        }
-        if (result) *result = 1;
-        return true;
-    }
-
-    if (msg && msg->message == kKeyboardHookMessage &&
-        static_cast<unsigned int>(msg->wParam) == VK_F5 &&
-        (msg->lParam & (kHookCtrlFlag | kHookShiftFlag | kHookAltFlag)) == 0) {
-        if (QApplication::activeModalWidget() && QApplication::activeModalWidget() != this) {
-            return false;
-        }
-        dismissMenusForGameAction();
-        openSettingsDialog();
-        if (result) *result = 1;
-        return true;
     }
 
     if (shouldYieldKeyboardHandlingToFocusedWidget()) return false;
     if (msg && msg->message == WM_HOTKEY) {
         switch (static_cast<int>(msg->wParam)) {
         case kHotkeyF11:
-            announceCurrentTurn();
+            triggerShortcutAction(ShortcutAction::CurrentTurn,
+                                  QStringLiteral("windows_hotkey"));
             if (result) *result = 1;
             return true;
         case kHotkeyF12:
-            announceLastAction();
+            triggerShortcutAction(ShortcutAction::LastAction,
+                                  QStringLiteral("windows_hotkey"));
             if (result) *result = 1;
             return true;
         case kHotkeyAltF:
-            announceScore();
+            triggerShortcutAction(ShortcutAction::Score,
+                                  QStringLiteral("windows_hotkey"));
             if (result) *result = 1;
             return true;
         default:
@@ -1642,20 +1704,23 @@ bool MainWindow::handleWindowsMessage(void* message, qintptr* result) {
     if (msg && (msg->message == WM_KEYDOWN ||
                 msg->message == WM_SYSKEYDOWN ||
                 msg->message == WM_SYSCHAR)) {
-        if ((msg->message == WM_KEYDOWN || msg->message == WM_SYSKEYDOWN) &&
-            isSingleFireKey(static_cast<DWORD>(msg->wParam)) &&
-            (static_cast<quintptr>(msg->lParam) & (quintptr{1} << 30)) != 0) {
-            if (result) *result = 1;
-            return true;
-        }
         const bool altDown = msg->message == WM_SYSKEYDOWN ||
             msg->message == WM_SYSCHAR ||
             (HIWORD(msg->lParam) & KF_ALTDOWN) != 0 ||
             (GetKeyState(VK_MENU) & 0x8000) != 0;
+        const bool ctrlDown = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+        const bool shiftDown = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+        if ((msg->message == WM_KEYDOWN || msg->message == WM_SYSKEYDOWN) &&
+            isSingleFireKey(static_cast<DWORD>(msg->wParam),
+                            ctrlDown, shiftDown, altDown) &&
+            (static_cast<quintptr>(msg->lParam) & (quintptr{1} << 30)) != 0) {
+            if (result) *result = 1;
+            return true;
+        }
         const bool handled = handleNativeShortcut(
             static_cast<unsigned int>(msg->wParam),
-            (GetKeyState(VK_CONTROL) & 0x8000) != 0,
-            (GetKeyState(VK_SHIFT) & 0x8000) != 0,
+            ctrlDown,
+            shiftDown,
             altDown,
             static_cast<unsigned int>((HIWORD(msg->lParam) & 0xFF)));
         if (handled) {
@@ -1693,6 +1758,12 @@ bool MainWindow::handleNativeShortcut(
         requestApplicationExit();
         return true;
     }
+
+    const auto configuredAction = m_settings.shortcuts.actionFor(
+        shortcutFromVirtualKey(virtualKey, ctrlDown, shiftDown, altDown));
+    if (!configuredAction) return false;
+    return triggerShortcutAction(*configuredAction,
+                                 QStringLiteral("native_key_message"));
 
     if (virtualKey == VK_F1 && noModifier) {
         triggerBattleShortcut();
@@ -1904,9 +1975,16 @@ void MainWindow::registerSystemHotkeys() {
         OutputDebugStringW(message.c_str());
     };
 
-    tryRegister(kHotkeyF11, MOD_NOREPEAT, VK_F11, L"F11");
-    tryRegister(kHotkeyF12, MOD_NOREPEAT, VK_F12, L"F12");
-    tryRegister(kHotkeyAltF, MOD_ALT | MOD_NOREPEAT, 'F', L"Alt+F");
+    const auto registerConfigured = [&](int id, ShortcutAction action, const wchar_t* name) {
+        const auto binding = m_settings.shortcuts.binding(action);
+        const UINT virtualKey = virtualKeyFromShortcut(binding);
+        if (virtualKey != 0) {
+            tryRegister(id, nativeModifiersFromShortcut(binding), virtualKey, name);
+        }
+    };
+    registerConfigured(kHotkeyF11, ShortcutAction::CurrentTurn, L"current turn");
+    registerConfigured(kHotkeyF12, ShortcutAction::LastAction, L"last action");
+    registerConfigured(kHotkeyAltF, ShortcutAction::Score, L"score");
 #endif
 }
 
@@ -1921,10 +1999,185 @@ void MainWindow::unregisterSystemHotkeys() {
 #endif
 }
 
+bool MainWindow::triggerShortcutAction(ShortcutAction action, const QString& source) {
+    const auto phase = m_engine.state().phase();
+    switch (action) {
+    case ShortcutAction::Battle:
+        triggerBattleShortcut();
+        return true;
+    case ShortcutAction::BottomCards:
+        return triggerBottomCardsShortcut(
+            source.isEmpty() ? QStringLiteral("configured_shortcut") : source);
+    case ShortcutAction::OpenSettings:
+        dismissMenusForGameAction();
+        openSettingsDialog();
+        return true;
+    case ShortcutAction::PauseResume: {
+        GameCommand cmd;
+        if (phase == GamePhase::Playing) {
+            cmd.type = GameCommandType::Pause;
+        } else if (phase == GamePhase::Paused) {
+            cmd.type = GameCommandType::Resume;
+        } else {
+            return true;
+        }
+        const auto result = m_engine.execute(cmd);
+        refreshFromState();
+        if (result.success && cmd.type == GameCommandType::Resume &&
+            m_engine.fullState().currentPlayer != PlayerId::Player1) {
+            scheduleAiTurn();
+        }
+        return true;
+    }
+    case ShortcutAction::ExitApplication:
+    case ShortcutAction::QuickExitApplication:
+        close();
+        return true;
+    case ShortcutAction::CurrentTurn:
+        announceCurrentTurn();
+        return true;
+    case ShortcutAction::LastAction:
+        announceLastAction();
+        return true;
+    case ShortcutAction::Score:
+        dismissMenusForGameAction();
+        announceScore();
+        return true;
+    case ShortcutAction::ReturnToMainScreen:
+        if (phase != GamePhase::NotStarted) returnToMainScreen();
+        return true;
+    case ShortcutAction::PreviousRankGroup:
+    case ShortcutAction::NextRankGroup:
+    case ShortcutAction::PreviousCard:
+    case ShortcutAction::NextCard:
+    case ShortcutAction::FirstRankGroup:
+    case ShortcutAction::LastRankGroup: {
+        if (!m_handView || !m_handModel || m_handModel->rowCount() <= 0) return false;
+        resumeHandAccessibilityForUserAction();
+        const int row = m_handView->currentIndex().isValid()
+            ? m_handView->currentIndex().row() : 0;
+        int target = -1;
+        if (action == ShortcutAction::PreviousRankGroup) {
+            target = m_handModel->previousBrowsableGroupStartRow(row);
+        } else if (action == ShortcutAction::NextRankGroup) {
+            target = m_handModel->nextBrowsableGroupStartRow(row);
+        } else if (action == ShortcutAction::PreviousCard) {
+            target = m_handModel->previousUnselectedRow(row);
+        } else if (action == ShortcutAction::NextCard) {
+            target = m_handModel->nextUnselectedRow(row);
+        } else if (action == ShortcutAction::FirstRankGroup) {
+            target = m_handModel->firstUnselectedRow();
+        } else {
+            target = m_handModel->lastBrowsableGroupStartRow();
+        }
+        if (target >= 0) moveHandCursorTo(target);
+        return true;
+    }
+    case ShortcutAction::PickCard:
+        if (phase != GamePhase::Playing || !m_handModel || m_handModel->rowCount() <= 0) {
+            return false;
+        }
+        takeCurrentCard();
+        return true;
+    case ShortcutAction::PickRankGroup:
+        if (phase != GamePhase::Playing || !m_handModel || m_handModel->rowCount() <= 0) {
+            return false;
+        }
+        takeCurrentGroup();
+        return true;
+    case ShortcutAction::PutDownCard:
+        if (phase != GamePhase::Playing || !m_handModel || m_handModel->rowCount() <= 0) {
+            return false;
+        }
+        putDownNextPickedCard();
+        return true;
+    case ShortcutAction::PutDownAllCards:
+        if (phase != GamePhase::Playing || !m_handModel || m_handModel->rowCount() <= 0) {
+            return false;
+        }
+        putDownAllCards();
+        return true;
+    case ShortcutAction::PlayCards:
+        if (isHumanBiddingTurn()) {
+            auto* button = focusedBidButton();
+            if (!button) {
+                cycleBiddingControlFocus(false);
+                button = focusedBidButton();
+            }
+            const int bidValue = m_bidButtons.indexOf(button);
+            if (button && button->isEnabled() && bidValue >= 0) onBid(bidValue);
+            else announceBiddingPrompt();
+            return true;
+        }
+        if (phase == GamePhase::Playing &&
+            m_engine.fullState().currentPlayer == PlayerId::Player1) {
+            onPlayCards();
+            return true;
+        }
+        return false;
+    case ShortcutAction::Pass:
+        if (phase == GamePhase::Playing &&
+            m_engine.fullState().currentPlayer == PlayerId::Player1) {
+            onPass();
+            return true;
+        }
+        return false;
+    case ShortcutAction::BidZero:
+        if (isHumanBiddingTurn()) {
+            onBid(0);
+            return true;
+        }
+        return false;
+    case ShortcutAction::PlayerOneOrBidOne:
+    case ShortcutAction::PlayerTwoOrBidTwo:
+    case ShortcutAction::PlayerThreeOrBidThree:
+    case ShortcutAction::PlayerFour: {
+        const int position = action == ShortcutAction::PlayerOneOrBidOne ? 1
+            : action == ShortcutAction::PlayerTwoOrBidTwo ? 2
+            : action == ShortcutAction::PlayerThreeOrBidThree ? 3 : 4;
+        if (position <= 3 && isHumanBiddingTurn()) onBid(position);
+        else announcePlayerAtPosition(position);
+        return true;
+    }
+    case ShortcutAction::Count:
+        break;
+    }
+    return false;
+}
+
 bool MainWindow::handleKeyPress(QKeyEvent* event) {
     auto phase = m_engine.state().phase();
     const auto modifiers = event->modifiers();
     const auto navigationModifiers = modifiers & ~Qt::KeypadModifier;
+    const auto configuredAction = m_settings.shortcuts.actionFor(
+        ShortcutSettings::fromKeyEvent(event->key(), modifiers));
+    if (configuredAction) {
+        const bool repeatable = *configuredAction == ShortcutAction::PreviousRankGroup ||
+            *configuredAction == ShortcutAction::NextRankGroup ||
+            *configuredAction == ShortcutAction::PreviousCard ||
+            *configuredAction == ShortcutAction::NextCard;
+        if (event->isAutoRepeat() && !repeatable) return true;
+        return triggerShortcutAction(*configuredAction, QStringLiteral("qt_event"));
+    }
+    if (isHumanBiddingTurn() && navigationModifiers == Qt::NoModifier &&
+        event->key() == Qt::Key_Space) {
+        auto* button = focusedBidButton();
+        if (!button) {
+            cycleBiddingControlFocus(false);
+            button = focusedBidButton();
+        }
+        const int bidValue = m_bidButtons.indexOf(button);
+        if (button && button->isEnabled() && bidValue >= 0) onBid(bidValue);
+        else announceBiddingPrompt();
+        return true;
+    }
+    if (event->key() == Qt::Key_Space && navigationModifiers == Qt::NoModifier &&
+        phase == GamePhase::Playing &&
+        m_engine.fullState().currentPlayer == PlayerId::Player1) {
+        return true;
+    }
+    return false;
+
     if (event->key() == Qt::Key_Escape && navigationModifiers == Qt::NoModifier) {
         if (phase != GamePhase::NotStarted) returnToMainScreen();
         return true;
@@ -2397,7 +2650,14 @@ void MainWindow::openSettingsDialog() {
     }
     updateTurnCountdown(m_engine.state().phase() == GamePhase::Playing &&
                         m_engine.fullState().currentPlayer == PlayerId::Player1);
-    announce(L"设置已保存", AnnouncementCategory::System);
+    const bool modeChangesNextRound =
+        (m_engine.state().phase() == GamePhase::Bidding ||
+         m_engine.state().phase() == GamePhase::Playing ||
+         m_engine.state().phase() == GamePhase::Paused) &&
+        m_settings.playerCount != m_engine.fullState().activePlayerCount;
+    announce(modeChangesNextRound ? L"设置已保存，游戏人数将在下一局生效"
+                                  : L"设置已保存",
+             AnnouncementCategory::System);
     QTimer::singleShot(0, this, [this]() {
         if (isHumanBiddingTurn()) {
             showBiddingControls();
@@ -2407,6 +2667,17 @@ void MainWindow::openSettingsDialog() {
             setFocus(Qt::OtherFocusReason);
         }
     });
+}
+
+void MainWindow::openShortcutDialog() {
+    ShortcutDialog dialog(m_settings.shortcuts, this);
+    if (dialog.exec() != QDialog::Accepted) return;
+    m_settings.shortcuts = dialog.settings();
+    m_settings.shortcuts.normalize();
+    saveSettings();
+    applyShortcutBindings();
+    announce(L"快捷键设置已保存", AnnouncementCategory::System);
+    QTimer::singleShot(0, this, [this]() { setFocus(Qt::OtherFocusReason); });
 }
 
 void MainWindow::openSoundManagerDialog() {
@@ -2756,6 +3027,7 @@ QString MainWindow::buildDiagnosticReport() const {
 
     out << "\n[牌局公开状态]\n";
     out << "game_id: " << snapshot.gameId << "\n";
+    out << "active_player_count: " << snapshot.activePlayerCount << "\n";
     out << "phase: " << gamePhaseText(snapshot.phase) << "\n";
     out << "current_player: " << (static_cast<int>(snapshot.currentPlayer) + 1) << "\n";
     out << "base_score: " << snapshot.baseScore << "\n";
@@ -2765,7 +3037,7 @@ QString MainWindow::buildDiagnosticReport() const {
     out << "bottom_auto_announced_this_round: "
         << (m_bottomCardsAnnouncedGameId == snapshot.gameId ? "是" : "否") << "\n";
     out << "last_bottom_cards_query_time: " << m_lastBottomCardsQueryTime << "\n";
-    for (int index = 0; index < PLAYER_COUNT; ++index) {
+    for (int index = 0; index < snapshot.activePlayerCount; ++index) {
         const auto& player = snapshot.players[static_cast<size_t>(index)];
         out << "player_" << (index + 1) << "_remaining: " << player.remainingCards
             << ", role=" << static_cast<int>(player.role)
@@ -2776,6 +3048,7 @@ QString MainWindow::buildDiagnosticReport() const {
 
     out << "\n[安全设置摘要]\n";
     out << "ai_difficulty: " << m_settings.aiDifficulty << "\n";
+    out << "configured_player_count: " << m_settings.playerCount << "\n";
     out << "ai_delay: " << m_settings.aiDelay << "\n";
     out << "sort_mode: " << m_settings.sortMode << "\n";
     out << "auto_pass: " << (m_settings.autoPassEnabled ? "开" : "关") << "\n";
@@ -3053,6 +3326,14 @@ void MainWindow::announcePlayerAtPosition(int position) {
     if (position < 1 || position > 4) return;
 
     const auto& state = m_engine.fullState();
+    if (position > state.activePlayerCount && state.gameId != 0) {
+        const std::wstring modeName = state.activePlayerCount == TWO_PLAYER_COUNT
+            ? L"二人" : L"三人";
+        announce(L"当前" + modeName + L"模式没有" +
+                     playerIdDisplayName(static_cast<PlayerId>(position - 1)),
+                 AnnouncementCategory::System);
+        return;
+    }
     PlayerId pid = static_cast<PlayerId>(position - 1);
     const auto& player = state.players[static_cast<size_t>(pid)];
 
@@ -3074,7 +3355,8 @@ void MainWindow::announcePlayerAtPosition(int position) {
 
 void MainWindow::announceBottomCards() {
     const auto snapshot = m_engine.publicSnapshot();
-    if (!snapshot.bottomCardsRevealed || snapshot.bottomCards.size() != BOTTOM_CARDS) {
+    if (!snapshot.bottomCardsRevealed || snapshot.bottomCards.size() !=
+        static_cast<size_t>(bottomCardsForPlayerCount(snapshot.activePlayerCount))) {
         if (snapshot.phase == GamePhase::Bidding) {
             announce(L"底牌尚未公开", AnnouncementCategory::System);
         } else {
@@ -3106,7 +3388,8 @@ int MainWindow::announceNewDealBottomCards(const CommandResult& result,
         });
     const auto snapshot = m_engine.publicSnapshot();
     if (!containsReveal || snapshot.phase != GamePhase::Playing ||
-        !snapshot.bottomCardsRevealed || snapshot.bottomCards.size() != BOTTOM_CARDS ||
+        !snapshot.bottomCardsRevealed || snapshot.bottomCards.size() !=
+            static_cast<size_t>(bottomCardsForPlayerCount(snapshot.activePlayerCount)) ||
         m_bottomCardsAnnouncedGameId == snapshot.gameId) {
         return 0;
     }
@@ -3161,7 +3444,8 @@ void MainWindow::announceCurrentTurn() {
 void MainWindow::announceLastAction() {
     const auto& state = m_engine.fullState();
     if (!state.lastPlayedCards.empty()) {
-        const auto pattern = PatternAnalyzer::analyze(state.lastPlayedCards);
+        const auto pattern = PatternAnalyzer::analyze(
+            state.lastPlayedCards, state.activePlayerCount);
         std::wstring text = playedCardsPlayerDisplayName(state.lastPlayedBy) + L"，";
         text += CardTextFormatter::formatPlayedCards(pattern, state.lastPlayedCards);
         announce(text, AnnouncementCategory::System);
@@ -3228,7 +3512,7 @@ void MainWindow::showRoundResult() {
     items << QString::fromUtf8(u8"最终倍数：") + QString::number(round.finalMultiplier);
     items << QString::fromUtf8(u8"特殊结算：") +
         QString::fromUtf8(round.spring ? u8"春天" : round.antiSpring ? u8"反春" : u8"无");
-    for (int index = 0; index < PLAYER_COUNT; ++index) {
+    for (int index = 0; index < state.activePlayerCount; ++index) {
         const auto playerId = static_cast<PlayerId>(index);
         items << QString::fromStdWString(playerDisplayName(playerId)) +
             QString::fromUtf8(u8"本局得分：") +

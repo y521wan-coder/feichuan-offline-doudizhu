@@ -15,7 +15,7 @@ ScoreResult ScoringEngine::calculate(const FullGameState& state) {
     // Determine winner
     // Landlord is player whose role is Landlord
     int landlordIdx = -1;
-    for (int i = 0; i < PLAYER_COUNT; ++i) {
+    for (int i = 0; i < state.activePlayerCount; ++i) {
         if (state.players[i].role == Role::Landlord) {
             landlordIdx = i;
             break;
@@ -44,7 +44,7 @@ ScoreResult ScoringEngine::calculate(const FullGameState& state) {
     if (landlordWon) {
         // Spring: landlord won and no farmer played any card
         bool noFarmerPlayed = true;
-        for (int i = 0; i < PLAYER_COUNT; ++i) {
+        for (int i = 0; i < state.activePlayerCount; ++i) {
             if (state.players[i].role == Role::Farmer && state.players[i].hasPlayedThisRound) {
                 noFarmerPlayed = false;
                 break;
@@ -69,15 +69,15 @@ ScoreResult ScoringEngine::calculate(const FullGameState& state) {
     int64_t baseUnit = result.baseScore * result.totalMultiplier;
 
     if (landlordWon) {
-        result.scoreChanges[landlordIdx] = baseUnit * 3;
-        for (int i = 0; i < PLAYER_COUNT; ++i) {
+        result.scoreChanges[landlordIdx] = baseUnit * (state.activePlayerCount - 1);
+        for (int i = 0; i < state.activePlayerCount; ++i) {
             if (i != landlordIdx) {
                 result.scoreChanges[i] = -baseUnit;
             }
         }
     } else {
-        result.scoreChanges[landlordIdx] = -baseUnit * 3;
-        for (int i = 0; i < PLAYER_COUNT; ++i) {
+        result.scoreChanges[landlordIdx] = -baseUnit * (state.activePlayerCount - 1);
+        for (int i = 0; i < state.activePlayerCount; ++i) {
             if (i != landlordIdx) {
                 result.scoreChanges[i] = baseUnit;
             }

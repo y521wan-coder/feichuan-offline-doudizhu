@@ -102,6 +102,7 @@ add_library(fpdz_app STATIC
     src/app/application.cpp
     src/app/service_registry.cpp
     src/app/app_settings.cpp
+    src/app/shortcut_settings.cpp
 )
 target_include_directories(fpdz_app PUBLIC "${CMAKE_SOURCE_DIR}/src")
 target_link_libraries(fpdz_app PUBLIC

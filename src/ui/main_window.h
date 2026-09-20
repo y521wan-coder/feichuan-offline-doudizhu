@@ -21,6 +21,7 @@
 #include "../core/engine/game_event.h"
 #include "../core/engine/game_state.h"
 #include "../accessibility/announcement.h"
+class QShortcut;
 namespace fpdz {
 class GameEngine;
 class HandListModel;
@@ -32,6 +33,7 @@ class SoundService;
 class DiagnosticTraceService;
 class ResultDialog;
 class CardTableWidget;
+class ShortcutDialog;
 class MainWindow : public QMainWindow, public QAbstractNativeEventFilter {
     Q_OBJECT
 public:
@@ -61,6 +63,8 @@ private:
     void dismissMenusForGameAction();
     void setupUi();
     void setupShortcuts();
+    void applyShortcutBindings();
+    bool triggerShortcutAction(ShortcutAction action, const QString& source = {});
     void onPlayCards();
     void onPass();
     void onHint();
@@ -77,6 +81,7 @@ private:
     void loadSettings();
     void saveSettings();
     void openSettingsDialog();
+    void openShortcutDialog();
     void openSoundManagerDialog();
     bool openHelpTextFile(const QString& fileName);
     void showDonateDialog();
@@ -172,6 +177,11 @@ private:
     bool m_forceExitRequested = false;
     QElapsedTimer m_battleShortcutTimer;
     QVector<int> m_registeredHotkeys;
+    QVector<QShortcut*> m_applicationShortcuts;
+    QAction* m_battleAction = nullptr;
+    QAction* m_pauseAction = nullptr;
+    QAction* m_quitAction = nullptr;
+    QAction* m_settingsAction = nullptr;
     QMenu* m_gameMenu = nullptr;
     QMenu* m_settingsMenu = nullptr;
     QMenu* m_helpMenu = nullptr;

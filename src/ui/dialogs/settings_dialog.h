@@ -17,6 +17,7 @@ public:
 
 private:
     AppSettings m_settings;
+    QComboBox* m_playerCount = nullptr;
     QCheckBox* m_autoPassEnabled = nullptr;
     QSpinBox* m_autoPassSeconds = nullptr;
     QComboBox* m_aiDifficulty = nullptr;

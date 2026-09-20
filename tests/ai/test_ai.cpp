@@ -1,5 +1,6 @@
 #include <QtTest>
 #include <QJsonArray>
+#include <algorithm>
 
 #include "ai/ai_level_profile.h"
 #include "ai/bidding_strategy.h"
@@ -136,6 +137,37 @@ private slots:
         hand.addCards(sameRankCards(Rank::Three, 5));
         const auto freeMoves = LegalMoveGenerator::generateLegalMoves(hand);
         QVERIFY(containsResponse(freeMoves, CardPatternType::KingBomb, Rank::BigJoker));
+    }
+
+    void testSingleDeckGeneratorsAddStandardAttachmentsOnlyForSingleDeckModes() {
+        Hand hand;
+        hand.addCards(sameRankCards(Rank::Three, 3));
+        hand.addCards(sameRankCards(Rank::Four, 3));
+        hand.addCards(sameRankCards(Rank::Eight, 4));
+        hand.addCard(Card::create(Rank::Six, Suit::Spades, 0));
+        hand.addCard(Card::create(Rank::Seven, Suit::Hearts, 0));
+        hand.addCard(Card::create(Rank::Nine, Suit::Clubs, 0));
+        hand.addCard(Card::create(Rank::Ten, Suit::Diamonds, 0));
+
+        const auto threePlayerMoves = LegalMoveGenerator::generateLegalMoves(
+            hand, std::nullopt, THREE_PLAYER_COUNT);
+        const auto twoPlayerMoves = LegalMoveGenerator::generateLegalMoves(
+            hand, std::nullopt, TWO_PLAYER_COUNT);
+        const auto fourPlayerMoves = LegalMoveGenerator::generateLegalMoves(
+            hand, std::nullopt, PLAYER_COUNT);
+        auto hasType = [](const std::vector<LegalMove>& moves, CardPatternType type) {
+            return std::any_of(moves.begin(), moves.end(),
+                [type](const LegalMove& move) { return move.pattern.type == type; });
+        };
+        QVERIFY(hasType(threePlayerMoves, CardPatternType::TripleWithSingle));
+        QVERIFY(hasType(threePlayerMoves, CardPatternType::AirplaneWithSingles));
+        QVERIFY(hasType(threePlayerMoves, CardPatternType::FourWithTwoSingles));
+        QVERIFY(hasType(twoPlayerMoves, CardPatternType::TripleWithSingle));
+        QVERIFY(hasType(twoPlayerMoves, CardPatternType::AirplaneWithSingles));
+        QVERIFY(hasType(twoPlayerMoves, CardPatternType::FourWithTwoSingles));
+        QVERIFY(!hasType(fourPlayerMoves, CardPatternType::TripleWithSingle));
+        QVERIFY(!hasType(fourPlayerMoves, CardPatternType::AirplaneWithSingles));
+        QVERIFY(!hasType(fourPlayerMoves, CardPatternType::FourWithTwoSingles));
     }
 
     void testThreeDifficultyProfiles() {

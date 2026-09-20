@@ -4,6 +4,20 @@ using namespace fpdz;
 class TestDeck : public QObject {
     Q_OBJECT
 private slots:
+    void testCreateSingleDeckForThreePlayerMode() {
+        const auto deck = Deck::createSingleDeck();
+        QCOMPARE(static_cast<int>(deck.size()), THREE_PLAYER_TOTAL_CARDS);
+        for (int index = 0; index < static_cast<int>(deck.size()); ++index) {
+            QVERIFY(deck[static_cast<size_t>(index)].isValid());
+            QCOMPARE(static_cast<int>(deck[static_cast<size_t>(index)].id()), index);
+            QCOMPARE(deck[static_cast<size_t>(index)].deckIndex(), static_cast<DeckIndex>(0));
+        }
+        QCOMPARE(static_cast<int>(Deck::createForPlayerCount(THREE_PLAYER_COUNT).size()),
+                 THREE_PLAYER_TOTAL_CARDS);
+        QCOMPARE(static_cast<int>(Deck::createForPlayerCount(TWO_PLAYER_COUNT).size()),
+                 TWO_PLAYER_TOTAL_CARDS);
+        QCOMPARE(static_cast<int>(Deck::createForPlayerCount(PLAYER_COUNT).size()), TOTAL_CARDS);
+    }
     void testCreateDoubleDeck() {
         auto deck = Deck::createDoubleDeck();
         QCOMPARE(static_cast<int>(deck.size()), 108);

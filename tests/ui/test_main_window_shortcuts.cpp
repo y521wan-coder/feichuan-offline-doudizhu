@@ -38,11 +38,13 @@
 #include "core/rules/pattern_analyzer.h"
 #include "ui/main_window.h"
 #include "ui/dialogs/settings_dialog.h"
+#include "ui/dialogs/shortcut_dialog.h"
 #include "ui/models/hand_list_model.h"
 #include "ui/widgets/card_table_widget.h"
 #include "ui/sound_service.h"
 #include "persistence/diagnostic_trace_service.h"
 #include "persistence/data_paths.h"
+#include "persistence/settings_repository.h"
 
 using namespace fpdz;
 
@@ -82,6 +84,93 @@ private slots:
         QVERIFY(updateChecks->isChecked());
         QCOMPARE(voiceCombo->currentText(), QString::fromUtf8(u8"男声"));
         QCOMPARE(musicMode->currentText(), QString::fromUtf8(u8"自动切换"));
+    }
+
+    void testSettingsExposeTwoThreeAndFourPlayerModes() {
+        AppSettings settings;
+        settings.playerCount = THREE_PLAYER_COUNT;
+        SettingsDialog dialog(settings);
+
+        auto* combo = dialog.findChild<QComboBox*>(QStringLiteral("playerCountComboBox"));
+        QVERIFY(combo);
+        QCOMPARE(combo->count(), 3);
+        QCOMPARE(combo->itemData(0).toInt(), PLAYER_COUNT);
+        QCOMPARE(combo->itemData(1).toInt(), THREE_PLAYER_COUNT);
+        QCOMPARE(combo->itemData(2).toInt(), TWO_PLAYER_COUNT);
+        QCOMPARE(combo->itemText(0), QString::fromUtf8(u8"四人（两副牌）"));
+        QCOMPARE(combo->itemText(1), QString::fromUtf8(u8"三人（一副牌）"));
+        QCOMPARE(combo->itemText(2), QString::fromUtf8(u8"二人（一副牌）"));
+        QCOMPARE(combo->currentData().toInt(), THREE_PLAYER_COUNT);
+        QCOMPARE(dialog.settings().playerCount, THREE_PLAYER_COUNT);
+    }
+
+    void testSelectedThreePlayerModeStartsThreePlayerDeal() {
+        AppSettings selected;
+        selected.playerCount = THREE_PLAYER_COUNT;
+        selected.normalize();
+        SettingsRepository repository;
+        repository.setData(selected.toJson());
+        DataPaths::ensureDirectories();
+        QVERIFY(repository.save(DataPaths::settingsFile()));
+
+        GameEngine engine;
+        AccessibilityService accessibility;
+        MainWindow window(engine, accessibility);
+        window.startNewGame();
+
+        QCOMPARE(engine.fullState().activePlayerCount, THREE_PLAYER_COUNT);
+        QCOMPARE(engine.publicSnapshot().activePlayerCount, THREE_PLAYER_COUNT);
+        for (int index = 0; index < THREE_PLAYER_COUNT; ++index) {
+            QCOMPARE(engine.fullState().players[index].hand.size(),
+                     THREE_PLAYER_CARDS_PER_PLAYER);
+        }
+        QVERIFY(engine.fullState().players[3].hand.empty());
+        QCOMPARE(static_cast<int>(engine.fullState().bottomCards.size()),
+                 THREE_PLAYER_BOTTOM_CARDS);
+        auto* table = window.findChild<CardTableWidget*>(QStringLiteral("visualCardTable"));
+        QVERIFY(table);
+        QCOMPARE(table->displayedOpponentBackCount(PlayerId::Player4), 0);
+
+        AppSettings defaults;
+        defaults.normalize();
+        repository.setData(defaults.toJson());
+        QVERIFY(repository.save(DataPaths::settingsFile()));
+    }
+
+    void testSelectedTwoPlayerModeStartsHeadToHeadDeal() {
+        AppSettings selected;
+        selected.playerCount = TWO_PLAYER_COUNT;
+        selected.normalize();
+        SettingsRepository repository;
+        repository.setData(selected.toJson());
+        DataPaths::ensureDirectories();
+        QVERIFY(repository.save(DataPaths::settingsFile()));
+
+        GameEngine engine;
+        AccessibilityService accessibility;
+        MainWindow window(engine, accessibility);
+        window.startNewGame();
+
+        QCOMPARE(engine.fullState().activePlayerCount, TWO_PLAYER_COUNT);
+        QCOMPARE(engine.publicSnapshot().activePlayerCount, TWO_PLAYER_COUNT);
+        QCOMPARE(engine.fullState().players[0].hand.size(), TWO_PLAYER_CARDS_PER_PLAYER);
+        QCOMPARE(engine.fullState().players[1].hand.size(), TWO_PLAYER_CARDS_PER_PLAYER);
+        QVERIFY(engine.fullState().players[2].hand.empty());
+        QVERIFY(engine.fullState().players[3].hand.empty());
+        QCOMPARE(engine.fullState().players[1].seat, SeatPosition::North);
+        QCOMPARE(static_cast<int>(engine.fullState().bottomCards.size()),
+                 TWO_PLAYER_BOTTOM_CARDS);
+        auto* table = window.findChild<CardTableWidget*>(QStringLiteral("visualCardTable"));
+        QVERIFY(table);
+        QCOMPARE(table->displayedOpponentBackCount(PlayerId::Player2),
+                 TWO_PLAYER_CARDS_PER_PLAYER);
+        QCOMPARE(table->displayedOpponentBackCount(PlayerId::Player3), 0);
+        QCOMPARE(table->displayedOpponentBackCount(PlayerId::Player4), 0);
+
+        AppSettings defaults;
+        defaults.normalize();
+        repository.setData(defaults.toJson());
+        QVERIFY(repository.save(DataPaths::settingsFile()));
     }
 
     void testAnnouncementsUseTraditionalFocusEventWithoutMovingKeyboardFocus() {
@@ -811,7 +900,7 @@ private slots:
         QTRY_VERIFY(!window.isVisible());
     }
 
-    void testOnlyThreeTopLevelMenusAndAltXStillCloses() {
+    void testFourTopLevelMenuEntriesAndAltXStillCloses() {
         GameEngine engine;
         AccessibilityService accessibility;
         MainWindow window(engine, accessibility);
@@ -819,12 +908,17 @@ private slots:
         QVERIFY(QTest::qWaitForWindowActive(&window));
 
         QVERIFY(!window.findChild<QAction*>(QStringLiteral("topLevelQuitAction")));
-        QCOMPARE(window.menuBar()->actions().size(), 3);
+        QCOMPARE(window.menuBar()->actions().size(), 4);
+        auto* shortcutSettings = window.findChild<QAction*>(
+            QStringLiteral("shortcutSettingsMenuAction"));
+        QVERIFY(shortcutSettings);
+        QCOMPARE(shortcutSettings, window.menuBar()->actions()[3]);
+        QVERIFY(shortcutSettings->text().contains(QString::fromUtf8(u8"快捷键设置")));
         QTest::keyClick(&window, Qt::Key_X, Qt::AltModifier);
         QTRY_VERIFY(!window.isVisible());
     }
 
-    void testAltThenTabCyclesThreeMenusAndAltMenuShortcutsAreReleased() {
+    void testAltThenTabCyclesMenusAndShortcutSettingsEntry() {
         GameEngine engine;
         AccessibilityService accessibility;
         MainWindow window(engine, accessibility);
@@ -874,6 +968,9 @@ private slots:
         QTest::keyClick(&window, Qt::Key_Tab);
         QCOMPARE(window.menuBar()->activeAction()->text(), QString::fromUtf8(u8"帮助(H)"));
         QTest::keyClick(&window, Qt::Key_Tab);
+        QCOMPARE(window.menuBar()->activeAction()->text(),
+                 QString::fromUtf8(u8"快捷键设置"));
+        QTest::keyClick(&window, Qt::Key_Tab);
         QCOMPARE(window.menuBar()->activeAction()->text(), QString::fromUtf8(u8"游戏(G)"));
         QTest::keyClick(window.menuBar(), Qt::Key_Return);
         QTRY_VERIFY(QApplication::activePopupWidget());
@@ -887,6 +984,367 @@ private slots:
             QTest::keyClick(&window, key, Qt::AltModifier);
             QVERIFY(!QApplication::activePopupWidget());
         }
+    }
+
+    void testShortcutSettingsEntryOpensAccessibleChineseList() {
+        GameEngine engine;
+        AccessibilityService accessibility;
+        MainWindow window(engine, accessibility);
+        window.show();
+        QVERIFY(QTest::qWaitForWindowActive(&window));
+
+        bool inspected = false;
+        QTimer inspector;
+        inspector.setInterval(20);
+        connect(&inspector, &QTimer::timeout, [&]() {
+            auto* dialog = qobject_cast<ShortcutDialog*>(QApplication::activeModalWidget());
+            if (!dialog) return;
+            auto* list = dialog->findChild<QListWidget*>(
+                QStringLiteral("shortcutSettingsList"));
+            QVERIFY(list);
+            QCOMPARE(list->count(), static_cast<int>(ShortcutSettings::ActionCount));
+            QVERIFY(list->item(static_cast<int>(ShortcutAction::LastAction))
+                        ->text().contains(QStringLiteral("F12")));
+            QVERIFY(list->accessibleName().contains(QString::fromUtf8(u8"快捷键")));
+            auto* ok = dialog->findChild<QPushButton*>(
+                QStringLiteral("saveShortcutSettingsButton"));
+            QVERIFY(ok);
+            QCOMPARE(ok->text(), QString::fromUtf8(u8"确定"));
+            QVERIFY(!dialog->findChild<QPushButton*>(
+                QStringLiteral("editShortcutButton")));
+            inspected = true;
+            inspector.stop();
+            dialog->reject();
+        });
+        inspector.start();
+
+        QTest::keyPress(&window, Qt::Key_Alt);
+        QTest::keyRelease(&window, Qt::Key_Alt);
+        QTRY_VERIFY(window.menuBar()->hasFocus());
+        QTest::keyClick(window.menuBar(), Qt::Key_Tab);
+        QTest::keyClick(window.menuBar(), Qt::Key_Tab);
+        QTest::keyClick(window.menuBar(), Qt::Key_Tab);
+        QCOMPARE(window.menuBar()->activeAction()->objectName(),
+                 QStringLiteral("shortcutSettingsMenuAction"));
+        QTest::keyClick(window.menuBar(), Qt::Key_Return);
+        QVERIFY(inspected);
+    }
+
+    void testShortcutDialogChangesKeyAndShowsChineseConflict() {
+        ShortcutSettings settings;
+        ShortcutDialog dialog(settings);
+        dialog.show();
+        QVERIFY(QTest::qWaitForWindowActive(&dialog));
+        auto* list = dialog.findChild<QListWidget*>(
+            QStringLiteral("shortcutSettingsList"));
+        QVERIFY(list);
+
+        list->setCurrentRow(static_cast<int>(ShortcutAction::LastAction));
+        QTimer::singleShot(50, []() {
+            auto* selection = QApplication::activeModalWidget();
+            QVERIFY(selection);
+            QCOMPARE(selection->windowTitle(), QString::fromUtf8(u8"设置新快捷键"));
+            auto* keys = selection->findChild<QListWidget*>(
+                QStringLiteral("shortcutKeySelectionList"));
+            auto* status = selection->findChild<QLabel*>(
+                QStringLiteral("shortcutSelectionStatus"));
+            auto* useButton = selection->findChild<QPushButton*>(
+                QStringLiteral("useSelectedShortcutButton"));
+            QVERIFY(keys);
+            QVERIFY(status);
+            QVERIFY(useButton);
+            QVERIFY(keys->hasFocus());
+            int targetRow = -1;
+            for (int row = 0; row < keys->count(); ++row) {
+                if (keys->item(row)->text() == QString::fromUtf8(u8"下翻页键")) {
+                    targetRow = row;
+                    break;
+                }
+            }
+            QVERIFY(targetRow >= 0);
+            while (keys->currentRow() < targetRow) QTest::keyClick(keys, Qt::Key_Down);
+            while (keys->currentRow() > targetRow) QTest::keyClick(keys, Qt::Key_Up);
+            QTest::keyClick(keys, Qt::Key_Space);
+            QCOMPARE(keys->currentItem()->checkState(), Qt::Checked);
+            QVERIFY(status->text().contains(QString::fromUtf8(u8"当前选择：下翻页键")));
+            QVERIFY(useButton->isEnabled());
+            QTest::keyClick(keys, Qt::Key_Tab);
+            QVERIFY(useButton->hasFocus());
+            QTest::keyClick(useButton, Qt::Key_Return);
+        });
+        QTest::keyClick(list, Qt::Key_Return);
+        QVERIFY(list->currentItem()->text().contains(QString::fromUtf8(u8"下翻页键")));
+        QCOMPARE(dialog.settings().binding(ShortcutAction::LastAction).key,
+                 static_cast<int>(Qt::Key_PageDown));
+
+        bool sawConflict = false;
+        QTimer conflictInspector;
+        conflictInspector.setInterval(20);
+        connect(&conflictInspector, &QTimer::timeout, [&]() {
+            auto* message = qobject_cast<QMessageBox*>(QApplication::activeModalWidget());
+            if (!message || message->windowTitle() != QString::fromUtf8(u8"快捷键冲突")) {
+                return;
+            }
+            QVERIFY(message->text().contains(QString::fromUtf8(u8"复读上一条出牌")));
+            QVERIFY(message->text().contains(QString::fromUtf8(u8"下翻页键")));
+            sawConflict = true;
+            conflictInspector.stop();
+            message->accept();
+        });
+        conflictInspector.start();
+        list->setCurrentRow(static_cast<int>(ShortcutAction::BottomCards));
+        QTimer::singleShot(50, []() {
+            auto* selection = QApplication::activeModalWidget();
+            QVERIFY(selection);
+            auto* keys = selection->findChild<QListWidget*>(
+                QStringLiteral("shortcutKeySelectionList"));
+            auto* useButton = selection->findChild<QPushButton*>(
+                QStringLiteral("useSelectedShortcutButton"));
+            QVERIFY(keys);
+            QVERIFY(useButton);
+            int targetRow = -1;
+            for (int row = 0; row < keys->count(); ++row) {
+                if (keys->item(row)->text() == QString::fromUtf8(u8"下翻页键")) {
+                    targetRow = row;
+                    break;
+                }
+            }
+            QVERIFY(targetRow >= 0);
+            while (keys->currentRow() < targetRow) QTest::keyClick(keys, Qt::Key_Down);
+            while (keys->currentRow() > targetRow) QTest::keyClick(keys, Qt::Key_Up);
+            QTest::keyClick(keys, Qt::Key_Space);
+            QVERIFY(useButton->isEnabled());
+            QTest::keyClick(keys, Qt::Key_Tab);
+            QTest::keyClick(useButton, Qt::Key_Return);
+        });
+        QTest::keyClick(list, Qt::Key_Return);
+        QVERIFY(sawConflict);
+        QCOMPARE(dialog.settings().binding(ShortcutAction::BottomCards).key,
+                 static_cast<int>(Qt::Key_F2));
+    }
+
+    void testShortcutDialogSelectsCombinationWithUpDownAndSpace() {
+        ShortcutDialog dialog(ShortcutSettings{});
+        dialog.show();
+        QVERIFY(QTest::qWaitForWindowActive(&dialog));
+        auto* list = dialog.findChild<QListWidget*>(
+            QStringLiteral("shortcutSettingsList"));
+        QVERIFY(list);
+        list->setCurrentRow(static_cast<int>(ShortcutAction::LastAction));
+
+        QTimer::singleShot(50, []() {
+            auto* selection = QApplication::activeModalWidget();
+            QVERIFY(selection);
+            auto* keys = selection->findChild<QListWidget*>(
+                QStringLiteral("shortcutKeySelectionList"));
+            auto* status = selection->findChild<QLabel*>(
+                QStringLiteral("shortcutSelectionStatus"));
+            auto* useButton = selection->findChild<QPushButton*>(
+                QStringLiteral("useSelectedShortcutButton"));
+            QVERIFY(keys);
+            QVERIFY(status);
+            QVERIFY(useButton);
+
+            auto moveTo = [keys](const QString& text) {
+                int targetRow = -1;
+                for (int row = 0; row < keys->count(); ++row) {
+                    if (keys->item(row)->text() == text) {
+                        targetRow = row;
+                        break;
+                    }
+                }
+                QVERIFY(targetRow >= 0);
+                while (keys->currentRow() < targetRow) QTest::keyClick(keys, Qt::Key_Down);
+                while (keys->currentRow() > targetRow) QTest::keyClick(keys, Qt::Key_Up);
+            };
+
+            moveTo(QString::fromUtf8(u8"下翻页键"));
+            QTest::keyClick(keys, Qt::Key_Space);
+            QCOMPARE(keys->currentItem()->checkState(), Qt::Checked);
+            moveTo(QStringLiteral("Control"));
+            QTest::keyClick(keys, Qt::Key_Space);
+            QCOMPARE(keys->currentItem()->checkState(), Qt::Checked);
+            QCOMPARE(status->text(), QString::fromUtf8(u8"当前选择：Control加下翻页键"));
+            QTest::keyClick(keys, Qt::Key_Tab);
+            QVERIFY(useButton->hasFocus());
+            QTest::keyClick(useButton, Qt::Key_Return);
+        });
+
+        QTest::keyClick(list, Qt::Key_Return);
+        QCOMPARE(dialog.settings().binding(ShortcutAction::LastAction).key,
+                 static_cast<int>(Qt::Key_PageDown));
+        QCOMPARE(dialog.settings().binding(ShortcutAction::LastAction).modifiers,
+                 Qt::KeyboardModifiers(Qt::ControlModifier));
+        QCOMPARE(ShortcutSettings::keyName(
+                     dialog.settings().binding(ShortcutAction::LastAction)),
+                 QString::fromUtf8(u8"Control加下翻页键"));
+    }
+
+    void testShortcutDialogSelectsUpArrowAsSingleKey() {
+        ShortcutSettings settings;
+        settings.setBinding(ShortcutAction::PickCard,
+                            {Qt::Key_PageDown, Qt::NoModifier});
+        ShortcutDialog dialog(settings);
+        dialog.show();
+        QVERIFY(QTest::qWaitForWindowActive(&dialog));
+        auto* actions = dialog.findChild<QListWidget*>(
+            QStringLiteral("shortcutSettingsList"));
+        QVERIFY(actions);
+        actions->setCurrentRow(static_cast<int>(ShortcutAction::PickCard));
+
+        QTimer::singleShot(50, []() {
+            auto* selection = QApplication::activeModalWidget();
+            QVERIFY(selection);
+            auto* keys = selection->findChild<QListWidget*>(
+                QStringLiteral("shortcutKeySelectionList"));
+            auto* useButton = selection->findChild<QPushButton*>(
+                QStringLiteral("useSelectedShortcutButton"));
+            QVERIFY(keys);
+            QVERIFY(useButton);
+            int targetRow = -1;
+            for (int row = 0; row < keys->count(); ++row) {
+                if (keys->item(row)->text() == QString::fromUtf8(u8"上光标键")) {
+                    targetRow = row;
+                    break;
+                }
+            }
+            QVERIFY(targetRow >= 0);
+            while (keys->currentRow() < targetRow) QTest::keyClick(keys, Qt::Key_Down);
+            while (keys->currentRow() > targetRow) QTest::keyClick(keys, Qt::Key_Up);
+            QTest::keyClick(keys, Qt::Key_Space);
+            QCOMPARE(keys->currentItem()->checkState(), Qt::Checked);
+            QTest::keyClick(keys, Qt::Key_Tab);
+            QVERIFY(useButton->hasFocus());
+            QTest::keyClick(useButton, Qt::Key_Return);
+        });
+
+        QTest::keyClick(actions, Qt::Key_Return);
+        QCOMPARE(dialog.settings().binding(ShortcutAction::PickCard).key,
+                 static_cast<int>(Qt::Key_Up));
+        QCOMPARE(dialog.settings().binding(ShortcutAction::PickCard).modifiers,
+                 Qt::KeyboardModifiers(Qt::NoModifier));
+        QCOMPARE(ShortcutSettings::keyName(
+                     dialog.settings().binding(ShortcutAction::PickCard)),
+                 QString::fromUtf8(u8"上光标键"));
+    }
+
+    void testCustomizedTabTriggersGameShortcutOutsideMenus() {
+        AppSettings custom;
+        custom.shortcuts.setBinding(
+            ShortcutAction::LastAction, {Qt::Key_Tab, Qt::NoModifier});
+        custom.normalize();
+        SettingsRepository repository;
+        repository.setData(custom.toJson());
+        DataPaths::ensureDirectories();
+        QVERIFY(repository.save(DataPaths::settingsFile()));
+
+        GameEngine engine;
+        AccessibilityService accessibility;
+        MainWindow window(engine, accessibility);
+        window.show();
+        QVERIFY(QTest::qWaitForWindowActive(&window));
+        auto* statusLabel = window.statusBar()->findChild<QLabel*>();
+        QVERIFY(statusLabel);
+        statusLabel->setText(QString::fromUtf8(u8"尚未触发"));
+        QTest::keyClick(&window, Qt::Key_Tab);
+        QCOMPARE(statusLabel->text(), QString::fromUtf8(u8"空"));
+        QCOMPARE(window.menuBar()->activeAction(), nullptr);
+
+#ifdef Q_OS_WIN
+        statusLabel->setText(QString::fromUtf8(u8"等待原生跳格键"));
+        constexpr UINT keyboardHookMessage = WM_APP + 0x4F;
+        QVERIFY(PostMessageW(reinterpret_cast<HWND>(window.winId()),
+                             keyboardHookMessage, VK_TAB, 0));
+        QTRY_COMPARE(statusLabel->text(), QString::fromUtf8(u8"空"));
+#endif
+
+        AppSettings defaults;
+        defaults.normalize();
+        repository.setData(defaults.toJson());
+        QVERIFY(repository.save(DataPaths::settingsFile()));
+    }
+
+    void testCustomizedF12UsesChinesePageDownBindingInQtAndNativePaths() {
+        AppSettings custom;
+        custom.shortcuts.setBinding(
+            ShortcutAction::LastAction,
+            {Qt::Key_PageDown, Qt::NoModifier});
+        custom.normalize();
+        SettingsRepository repository;
+        repository.setData(custom.toJson());
+        DataPaths::ensureDirectories();
+        QVERIFY(repository.save(DataPaths::settingsFile()));
+
+        GameEngine engine;
+        AccessibilityService accessibility;
+        MainWindow window(engine, accessibility);
+        window.show();
+        QVERIFY(QTest::qWaitForWindowActive(&window));
+        auto* statusLabel = window.statusBar()->findChild<QLabel*>();
+        QVERIFY(statusLabel);
+
+        statusLabel->setText(QString::fromUtf8(u8"尚未触发"));
+        QTest::keyClick(&window, Qt::Key_F12);
+        QCOMPARE(statusLabel->text(), QString::fromUtf8(u8"尚未触发"));
+        QTest::keyClick(&window, Qt::Key_PageDown);
+        QCOMPARE(statusLabel->text(), QString::fromUtf8(u8"空"));
+
+#ifdef Q_OS_WIN
+        statusLabel->setText(QString::fromUtf8(u8"等待原生按键"));
+        constexpr UINT keyboardHookMessage = WM_APP + 0x4F;
+        QVERIFY(PostMessageW(reinterpret_cast<HWND>(window.winId()),
+                             keyboardHookMessage, VK_NEXT, 0));
+        QTRY_COMPARE(statusLabel->text(), QString::fromUtf8(u8"空"));
+#endif
+
+        AppSettings defaults;
+        defaults.normalize();
+        repository.setData(defaults.toJson());
+        QVERIFY(repository.save(DataPaths::settingsFile()));
+    }
+
+    void testCustomizedCombinationRequiresAllSelectedKeysInQtAndNativePaths() {
+        AppSettings custom;
+        custom.shortcuts.setBinding(
+            ShortcutAction::LastAction,
+            {Qt::Key_PageDown, Qt::ControlModifier});
+        custom.normalize();
+        SettingsRepository repository;
+        repository.setData(custom.toJson());
+        DataPaths::ensureDirectories();
+        QVERIFY(repository.save(DataPaths::settingsFile()));
+
+        GameEngine engine;
+        AccessibilityService accessibility;
+        MainWindow window(engine, accessibility);
+        window.show();
+        QVERIFY(QTest::qWaitForWindowActive(&window));
+        auto* statusLabel = window.statusBar()->findChild<QLabel*>();
+        QVERIFY(statusLabel);
+
+        statusLabel->setText(QString::fromUtf8(u8"尚未触发组合键"));
+        QTest::keyClick(&window, Qt::Key_PageDown);
+        QCOMPARE(statusLabel->text(), QString::fromUtf8(u8"尚未触发组合键"));
+        QTest::keyClick(&window, Qt::Key_PageDown, Qt::ControlModifier);
+        QCOMPARE(statusLabel->text(), QString::fromUtf8(u8"空"));
+
+#ifdef Q_OS_WIN
+        statusLabel->setText(QString::fromUtf8(u8"等待原生组合键"));
+        constexpr UINT keyboardHookMessage = WM_APP + 0x4F;
+        constexpr LPARAM controlFlag = 0x01;
+        QVERIFY(PostMessageW(reinterpret_cast<HWND>(window.winId()),
+                             keyboardHookMessage, VK_NEXT, 0));
+        QTest::qWait(20);
+        QCOMPARE(statusLabel->text(), QString::fromUtf8(u8"等待原生组合键"));
+        QVERIFY(PostMessageW(reinterpret_cast<HWND>(window.winId()),
+                             keyboardHookMessage, VK_NEXT, controlFlag));
+        QTRY_COMPARE(statusLabel->text(), QString::fromUtf8(u8"空"));
+#endif
+
+        AppSettings defaults;
+        defaults.normalize();
+        repository.setData(defaults.toJson());
+        QVERIFY(repository.save(DataPaths::settingsFile()));
     }
 
     void testF1ClosesOpenMenuBeforeStartingBattle() {

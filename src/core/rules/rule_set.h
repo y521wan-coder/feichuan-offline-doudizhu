@@ -16,7 +16,7 @@ struct RuleSet {
     static constexpr int MIN_AIRPLANE_LENGTH = 2;
 
     int ruleVersion = VERSION;
-    std::wstring ruleSetName = L"四人斗地主V1.0";
+    std::wstring ruleSetName = L"二人/三人/四人斗地主V1.0";
 
     static RuleSet defaultRules();
 };

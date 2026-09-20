@@ -60,7 +60,7 @@ std::wstring seatDisplayName(SeatPosition seat);
 std::wstring roleDisplayName(Role role);
 
 // Get next player in clockwise order
-PlayerId nextPlayer(PlayerId current);
+PlayerId nextPlayer(PlayerId current, int activePlayerCount = PLAYER_COUNT);
 
 } // namespace fpdz
 

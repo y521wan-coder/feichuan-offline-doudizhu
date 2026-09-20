@@ -10,12 +10,13 @@ namespace fpdz {
 
 class BiddingStrategy {
 public:
-    // Bidding is intentionally based on the player's 25-card hand only.
+    // Bidding is intentionally based on the player's own hand only.
     // Advanced probability sampling creates hypothetical bottoms from the
     // unknown pool and never receives the actual hidden bottom cards.
     static int decideBid(const Hand& hand, int currentHighestBid,
                          AiDifficulty difficulty = AiDifficulty::Beginner,
-                         uint64_t randomSalt = 0);
+                         uint64_t randomSalt = 0,
+                         int activePlayerCount = PLAYER_COUNT);
 };
 
 } // namespace fpdz

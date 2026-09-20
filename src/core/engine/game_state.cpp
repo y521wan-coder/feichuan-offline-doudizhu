@@ -26,6 +26,7 @@ PublicGameSnapshot GameState::publicSnapshot() const {
     PublicGameSnapshot snap;
     snap.gameId = m_fullState.gameId;
     snap.phase = m_phase;
+    snap.activePlayerCount = m_fullState.activePlayerCount;
     snap.currentPlayer = m_fullState.currentPlayer;
     snap.bottomCards = m_fullState.bottomCardsRevealed ? m_fullState.bottomCards : std::vector<Card>{};
     snap.bottomCardsRevealed = m_fullState.bottomCardsRevealed;
@@ -58,12 +59,13 @@ PublicGameSnapshot GameState::publicSnapshot() const {
 
 QJsonObject GameState::toJson() const {
     QJsonObject json;
-    json["schemaVersion"] = 3;
+    json["schemaVersion"] = 4;
     json["phase"] = static_cast<int>(m_phase);
     json["previousPhase"] = static_cast<int>(m_previousPhase);
     json["gameId"] = static_cast<qint64>(m_fullState.gameId);
     json["randomSeed"] = static_cast<qint64>(m_fullState.randomSeed);
     json["deterministicRandom"] = m_fullState.deterministicRandom;
+    json["activePlayerCount"] = m_fullState.activePlayerCount;
     json["currentPlayer"] = static_cast<int>(m_fullState.currentPlayer);
     json["lastPlayedBy"] = static_cast<int>(m_fullState.lastPlayedBy);
     json["consecutivePasses"] = m_fullState.consecutivePasses;
@@ -159,6 +161,9 @@ GameState GameState::fromJson(const QJsonObject& json) {
     state.m_fullState.gameId = json["gameId"].toVariant().toULongLong();
     state.m_fullState.randomSeed = json["randomSeed"].toVariant().toULongLong();
     state.m_fullState.deterministicRandom = json["deterministicRandom"].toBool(false);
+    const int savedPlayerCount = json["activePlayerCount"].toInt(PLAYER_COUNT);
+    state.m_fullState.activePlayerCount = isSupportedPlayerCount(savedPlayerCount)
+        ? savedPlayerCount : PLAYER_COUNT;
     state.m_fullState.currentPlayer = static_cast<PlayerId>(json["currentPlayer"].toInt());
     state.m_fullState.lastPlayedBy = static_cast<PlayerId>(json["lastPlayedBy"].toInt());
     state.m_fullState.consecutivePasses = json["consecutivePasses"].toInt();

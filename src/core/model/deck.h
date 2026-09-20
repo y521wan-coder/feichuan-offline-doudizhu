@@ -8,8 +8,13 @@ namespace fpdz {
 
 class Deck {
 public:
+    // Create the standard single deck of 54 cards used by three-player mode.
+    static std::vector<Card> createSingleDeck();
+
     // Create a double deck of 108 cards
     static std::vector<Card> createDoubleDeck();
+
+    static std::vector<Card> createForPlayerCount(int playerCount);
 
     // Shuffle with a fixed seed for reproducibility
     static void shuffle(std::vector<Card>& deck, uint64_t seed);

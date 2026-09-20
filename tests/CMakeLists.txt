@@ -114,9 +114,15 @@ add_test(NAME test_engine_simulation_seeds_1_250
     COMMAND test_engine_simulation testSeeds1To250)
 add_test(NAME test_engine_simulation_seeds_251_500
     COMMAND test_engine_simulation testSeeds251To500)
+add_test(NAME test_engine_simulation_three_player_seeds_1_50
+    COMMAND test_engine_simulation testThreePlayerSeeds1To50)
+add_test(NAME test_engine_simulation_two_player_seeds_1_50
+    COMMAND test_engine_simulation testTwoPlayerSeeds1To50)
 set_tests_properties(
     test_engine_simulation_seeds_1_250
     test_engine_simulation_seeds_251_500
+    test_engine_simulation_three_player_seeds_1_50
+    test_engine_simulation_two_player_seeds_1_50
     PROPERTIES TIMEOUT 300
 )
 

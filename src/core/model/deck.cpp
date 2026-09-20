@@ -56,6 +56,20 @@ bool operatingSystemRandom(uint64_t* value) {
 
 } // namespace
 
+std::vector<Card> Deck::createSingleDeck() {
+    std::vector<Card> deck;
+    deck.reserve(CARDS_PER_DECK);
+
+    for (CardId i = 0; i < CARDS_PER_DECK; ++i) {
+        Card card = Card::create(i);
+        assert(card.isValid());
+        deck.push_back(card);
+    }
+
+    assert(deck.size() == CARDS_PER_DECK);
+    return deck;
+}
+
 std::vector<Card> Deck::createDoubleDeck() {
     std::vector<Card> deck;
     deck.reserve(TOTAL_CARDS);
@@ -68,6 +82,11 @@ std::vector<Card> Deck::createDoubleDeck() {
 
     assert(deck.size() == TOTAL_CARDS);
     return deck;
+}
+
+std::vector<Card> Deck::createForPlayerCount(int playerCount) {
+    return playerCount == TWO_PLAYER_COUNT || playerCount == THREE_PLAYER_COUNT
+        ? createSingleDeck() : createDoubleDeck();
 }
 
 void Deck::shuffle(std::vector<Card>& deck, uint64_t seed) {
