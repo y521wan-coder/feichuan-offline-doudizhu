@@ -1469,21 +1469,22 @@ void MainWindow::onBid(int value) {
                 showBiddingControls(bottomCardsDelay == 0);
             }
         } else if (m_engine.state().phase() == GamePhase::Playing) {
-            const uint64_t gameId = m_engine.state().gameId();
-            const uint64_t eventSequence = m_engine.fullState().eventSequence;
             const PlayerId currentPlayer = m_engine.fullState().currentPlayer;
             const int transitionDelay = std::max(soundDelay, bottomCardsDelay);
-            QTimer::singleShot(transitionDelay, this,
-                [this, gameId, eventSequence, currentPlayer]() {
-                    if (!playResultStillCurrent(gameId, eventSequence,
-                                                GamePhase::Playing, currentPlayer)) return;
-                    const std::wstring transitionText = L"叫分结束，开始出牌";
-                    announce(transitionText, AnnouncementCategory::System,
-                             AnnouncementPriority::High);
-                    if (currentPlayer != PlayerId::Player1) {
+            if (currentPlayer != PlayerId::Player1) {
+                const uint64_t gameId = m_engine.state().gameId();
+                const uint64_t eventSequence = m_engine.fullState().eventSequence;
+                QTimer::singleShot(transitionDelay, this,
+                    [this, gameId, eventSequence, currentPlayer]() {
+                        if (!playResultStillCurrent(gameId, eventSequence,
+                                                    GamePhase::Playing,
+                                                    currentPlayer)) return;
+                        const std::wstring transitionText = L"叫分结束，开始出牌";
+                        announce(transitionText, AnnouncementCategory::System,
+                                 AnnouncementPriority::High);
                         scheduleAiTurn(readableAnnouncementDelayMilliseconds(transitionText));
-                    }
-                });
+                    });
+            }
         }
     } else {
         announce(result.userMessage, AnnouncementCategory::Error,
@@ -1855,8 +1856,8 @@ bool MainWindow::handleNativeShortcut(
         int row = m_handView->currentIndex().isValid() ? m_handView->currentIndex().row() : 0;
         if ((virtualKey == VK_LEFT || virtualKey == VK_RIGHT) && shiftDown && !ctrlDown) {
             const int target = virtualKey == VK_LEFT
-                ? m_handModel->previousUnselectedRow(row)
-                : m_handModel->nextUnselectedRow(row);
+                ? m_handModel->previousBrowsableGroupStartRow(row)
+                : m_handModel->nextBrowsableGroupStartRow(row);
             if (target >= 0) moveHandCursorTo(target);
             return true;
         }
@@ -2080,9 +2081,9 @@ bool MainWindow::triggerShortcutAction(ShortcutAction action, const QString& sou
         } else if (action == ShortcutAction::NextRankGroup) {
             target = m_handModel->nextBrowsableGroupStartRow(row);
         } else if (action == ShortcutAction::PreviousCard) {
-            target = m_handModel->previousUnselectedRow(row);
+            target = m_handModel->previousBrowsableGroupStartRow(row);
         } else if (action == ShortcutAction::NextCard) {
-            target = m_handModel->nextUnselectedRow(row);
+            target = m_handModel->nextBrowsableGroupStartRow(row);
         } else if (action == ShortcutAction::FirstRankGroup) {
             target = m_handModel->firstUnselectedRow();
         } else {
@@ -2299,8 +2300,8 @@ bool MainWindow::handleKeyPress(QKeyEvent* event) {
         if ((event->key() == Qt::Key_Left || event->key() == Qt::Key_Right)
             && handShiftDown && !handControlDown && !handAltDown) {
             const int target = event->key() == Qt::Key_Left
-                ? m_handModel->previousUnselectedRow(row)
-                : m_handModel->nextUnselectedRow(row);
+                ? m_handModel->previousBrowsableGroupStartRow(row)
+                : m_handModel->nextBrowsableGroupStartRow(row);
             if (target >= 0) moveHandCursorTo(target);
             return true;
         }
@@ -2456,7 +2457,7 @@ std::wstring MainWindow::formatEventForAnnouncement(const GameEvent& event) cons
         return playedCardsPlayerDisplayName(event.playerId) + L"出了" +
                CardTextFormatter::formatPlayedCards(event.pattern, event.cards);
     case GameEventType::PlayerPassed:
-        return playerDisplayName(event.playerId);
+        return playedCardsPlayerDisplayName(event.playerId);
     case GameEventType::TrickReset:
         return {};
     case GameEventType::PlayerLowCards:
@@ -2529,9 +2530,8 @@ void MainWindow::handleSuccessfulPlayResult(const CommandResult& result, bool ap
     if (event.type == GameEventType::CardsPlayed) {
         presentPlayedCards(event);
     } else {
-        const std::wstring playerName = playerDisplayName(event.playerId);
-        QTimer::singleShot(0, this, [this, playerName]() {
-            announce(playerName, AnnouncementCategory::Pass,
+        QTimer::singleShot(0, this, [this, actionText]() {
+            announce(actionText, AnnouncementCategory::Pass,
                      AnnouncementPriority::Normal, false);
         });
     }
@@ -3376,18 +3376,16 @@ void MainWindow::announcePlayerAtPosition(int position) {
     PlayerId pid = static_cast<PlayerId>(position - 1);
     const auto& player = state.players[static_cast<size_t>(pid)];
 
+    if (player.role == Role::Landlord) {
+        announce(L"地主，还剩" + std::to_wstring(player.remainingCards()) + L"张牌",
+                 AnnouncementCategory::System);
+        return;
+    }
+
     std::wstring text = playerDisplayName(pid);
     if (player.isHuman || pid == PlayerId::Player1) text += L"，自己";
-    text += L"，剩余" +
-                        std::to_wstring(player.remainingCards()) + L"张牌";
-
-    if (player.role == Role::Landlord) {
-        text += L"，地主";
-    } else if (player.role == Role::Farmer) {
-        text += L"，农民";
-    } else {
-        text += L"，身份未定";
-    }
+    text += L"，剩余" + std::to_wstring(player.remainingCards()) + L"张牌";
+    text += player.role == Role::Farmer ? L"，农民" : L"，身份未定";
 
     announce(text, AnnouncementCategory::System);
 }

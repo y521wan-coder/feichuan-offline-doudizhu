@@ -1,5 +1,5 @@
 飞船单机斗地主——继续开发说明
-更新时间：2026-09-22
+更新时间：2026-09-23
 项目：D:\飞船单机斗地主
 仓库：https://github.com/y521wan-coder/feichuan-offline-doudizhu
 
@@ -11,12 +11,13 @@
 
 二、正式状态
 
-- 正式版 1.7（Windows 文件版本 1.7.0.0）；更新服务器 `windows/stable/1.7`，Release ID 69，`status=published`。下次必须从 1.8 开始。
-- 安装包：`releases\飞船单机斗地主-Setup-1.7.exe`，61,994,721 字节，SHA-256 `FA2B542FF68CF7C47697D5A7543C8CA2AF7A1051BAAAC1CD258BA2EFCD134A86`，VersionInfo 1.7.0，Authenticode `NotSigned`。
-- 固定公钥清单：`releases\飞船单机斗地主-Setup-1.7.release-manifest.json`；密钥 ID `898098f7c562190b1bae909422cf7b5ef09a34bc3e400110fa18cc65a77ff81a`。服务器回下载大小、SHA-256 和签名一致（`SERVER_VERIFICATION=OK`）。
-- 打包构建主程序：852,992 字节，SHA-256 `4392CEC79CC0F68192BF1F1C2230EE5FB1FAFFBC66D8D19BD867A5DC555CF659`；更新器：72,192 字节，SHA-256 `C0785E7DB8310356917BF84A1881F8AC11F6B49D467211491228815022A101DF`，文件版本均为 1.7.0.0。主程序不依赖 Qt6Network，只有更新器联网。注意 MSVC 链接会写入时间戳，同一份源码两次构建大小相同而哈希不同，PE 哈希只能用于比对同一次构建。
-- 本机安装目录 `C:\Program Files\飞船单机斗地主` 已由 1.4 静默覆盖安装为 1.7（退出码 0）：游戏与更新器哈希与打包构建逐字节一致，NVDA DLL 与 LGPL 许可证就位，安装目录前后同为 196 个文件，公共桌面快捷方式唯一且指向安装目录主程序，用户设置、统计、日志哈希未变，主程序隐藏窗口 5 秒启动检查通过。
-- 尚未执行、不得写成通过：1.7 卸载与全新安装、NVDA/讲述人/争渡/保益四种读屏软件完整人工验收、物理键盘钩子人工实测、公开 CA Authenticode 签名，以及 1.7 对 1.6 的同种子强度对照。
+- 正式版 1.8（Windows 文件版本 1.8.0.0）；更新服务器 `windows/stable/1.8`，Release ID 70，`status=published`。下次必须从 1.9 开始。
+- 安装包：`releases\飞船单机斗地主-Setup-1.8.exe`，61,994,151 字节，SHA-256 `0E565F269418ADC1EC4497C4AB731EC230BCDC8510117E251FF0D831D830C355`，VersionInfo 1.8.0，Authenticode `NotSigned`。
+- 固定公钥清单：`releases\飞船单机斗地主-Setup-1.8.release-manifest.json`；密钥 ID `898098f7c562190b1bae909422cf7b5ef09a34bc3e400110fa18cc65a77ff81a`。服务器回下载大小、SHA-256 和签名一致（`SERVER_VERIFICATION=OK`）。
+- 打包构建主程序：852,992 字节，SHA-256 `8B2570B66B8AFABDB73045E8C427353F24D5FB631D695F03B7AD42A790332D1D`；更新器：72,192 字节，SHA-256 `C1105769593F0F92F5319424870B6DB31620C14AF0C8FA8CA0012501F66F38C9`，文件版本均为 1.8.0.0。主程序不依赖 Qt6Network，只有更新器联网。注意 MSVC 链接会写入时间戳，同一份源码两次构建大小相同而哈希不同，PE 哈希只能用于比对同一次构建。
+- 本机安装目录 `C:\Program Files\飞船单机斗地主` 最初已由 1.4 静默覆盖安装为正式 1.7（退出码 0）；2026-09-23 又按用户要求只换入本机试用主程序。当前游戏内核 852,992 字节、文件版本 1.7.0.0、SHA-256 `DFA19DB66E53F4429B3AABC9F0B297FA7CD573007A843D98216ECD1F723F4D42`；更新器仍为 `C0785E7DB8310356917BF84A1881F8AC11F6B49D467211491228815022A101DF`。安装目录替换前后均 196 个文件，逐文件哈希比对的唯一变化是主程序；旧正式内核备份在 `artifacts\kernel-replacement-20260923\backup\installed-game-before.exe`。替换后未启动游戏或更新器，等待用户试玩。
+- 本机安装目录仍是 1.7 安装内容加 2026-09-23 试用主程序；本轮未用 1.8 安装包覆盖它，也未启动正式 1.8。旧正式内核备份仍在 `artifacts\kernel-replacement-20260923\backup\installed-game-before.exe`。
+- 尚未执行、不得写成通过：1.8 覆盖安装、全新安装与卸载，NVDA/讲述人/争渡/保益四种读屏软件完整人工验收，物理键盘钩子人工实测，以及公开 CA Authenticode 签名。1.8 未修改 AI，1.7 的全知 AI 验证结论继续沿用，不新增强度声明。
 
 三、产品与 1.7 AI
 
@@ -45,7 +46,7 @@
 - 增量：`.\tools\build.ps1 -Preset release-x64 -Build -Test`
 - 全量：`.\tools\build.ps1 -Preset release-x64 -Configure -Build -Test`
 - 安装包：`.\tools\build_release.ps1 -Package`
-- 1.7 首次完整 CTest 19/19（154.69 秒）；正式打包再次 19/19（154.48 秒）。日志见 `logs\build-1.7-full.txt` 与 `logs\build-release-1.7-package.txt`。
+- 1.8 修改后针对性快捷键测试 110/110（12.774 秒）；增量 CTest 19/19（160.33 秒）；正式打包全量 CTest 再次 19/19（159.92 秒）。Inno Setup 成功生成正式安装包。
 - 修改规则或 AI 必须补充只经 `AiObservation` 构造的确定性测试（覆盖全知输入一致性、非法全知输入被拒绝、相同输入产生相同决策）；修改键盘或朗读须检查 Qt、native message、低级钩子、UIA 和复读路径。AI 日志不得记录暗牌。
 
 六、以后发布
@@ -57,3 +58,13 @@
 5. 更新文档，提交、创建 `v<版本>` 标签并推送。不得重复发布同版本、绕过签名或误称固定公钥签名为 Authenticode。
 
 详细历史见 `docs\开发日志.md`，验收证据见 `docs\测试与验收.md`，规则见 `docs\规则规格.md`。短期无计划变更。
+
+七、2026-09-23 正式发布 1.8
+
+- 修改文件：`src\ui\main_window.cpp`、`src\app\shortcut_settings.cpp`、`tests\ui\test_main_window_shortcuts.cpp`、`version.txt`、相关规格/验收/开发文档和本文。
+- 行为修复：Shift+左/右每个点数只朗读一次；真人叫到地主后不再追加“叫分结束，开始出牌”；数字键查询地主精简为“地主，还剩 X 张牌”；地主过牌的名称公告改为“地主”，原过牌音效不变。
+- 验证命令与结果：`test_main_window_shortcuts.exe` 最终 110/110 通过；`.\tools\build.ps1 -Preset release-x64 -Build -Test` 为 19/19 通过（160.33 秒）；`.\tools\build_release.ps1 -Package` 的全量 CTest 为 19/19 通过（159.92 秒）。主程序不依赖 Qt6Network。
+- 安装结果：按用户明确授权强制结束运行中的安装版游戏，随后只替换主程序；196 个安装文件中只有主程序哈希变化，更新器未变。
+- 正式发布：`version.txt` 升至 1.8；固定公钥清单签名成功；服务器 `windows/stable/1.8` 为 Release ID 70、`status=published`，旧版发现新版、1.8 无更新及服务器回下载大小、SHA-256、签名均通过验证。
+- 开源仓库：1.8 源码、测试、文档与版本文件提交到 `origin/main`，发布标签为 `v1.8`。
+- 未完成：正式 1.8 安装包的覆盖/全新安装、启动、快捷方式、卸载和用户数据保留验收，用户对正式 1.8 的实际试玩，四读屏完整人工验收及物理键盘钩子人工实测。

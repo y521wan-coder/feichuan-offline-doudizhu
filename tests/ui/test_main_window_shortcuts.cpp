@@ -654,11 +654,16 @@ private slots:
 
         QTest::keyClick(&window, Qt::Key_Home);
         QTest::keyClick(&window, Qt::Key_Right, Qt::ShiftModifier);
-        QCOMPARE(handView->currentIndex().row(), 1);
+        QCOMPARE(handView->currentIndex().row(), 3);
+        QCOMPARE(statusLabel->accessibleName(), QString::fromUtf8(u8"3张4"));
         QTest::keyClick(&window, Qt::Key_Left, Qt::ShiftModifier);
         QCOMPARE(handView->currentIndex().row(), 0);
-        QTest::keyClick(&window, Qt::Key_Right);
+        QCOMPARE(statusLabel->accessibleName(), QString::fromUtf8(u8"3张3"));
+        QTest::keyClick(&window, Qt::Key_Right, Qt::ShiftModifier);
         QCOMPARE(handView->currentIndex().row(), 3);
+        QTest::keyClick(&window, Qt::Key_Right, Qt::ShiftModifier);
+        QCOMPARE(handView->currentIndex().row(), 6);
+        QCOMPARE(statusLabel->accessibleName(), QString::fromUtf8(u8"4张7"));
 
         fullState.currentPlayer = PlayerId::Player2;
         window.refreshFromState();
@@ -1597,6 +1602,11 @@ private slots:
         QTRY_COMPARE(handModel->selectedCount(), 0);
         QVERIFY(PostMessageW(windowHandle, keyboardHookMessage, VK_HOME, 0));
         QTRY_COMPARE(handView->currentIndex().row(), 0);
+        QVERIFY(PostMessageW(windowHandle, keyboardHookMessage, VK_RIGHT, shiftFlag));
+        QTRY_COMPARE(handView->currentIndex().row(), 2);
+        auto* statusLabel = window.statusBar()->findChild<QLabel*>();
+        QVERIFY(statusLabel);
+        QTRY_COMPARE(statusLabel->accessibleName(), QString::fromUtf8(u8"1张4"));
 #else
         QSKIP("Windows native keyboard hook path only");
 #endif
@@ -1904,6 +1914,54 @@ private slots:
         window.close();
     }
 
+    void testBiddingFinishDoesNotReplacePublicCardsWithRedundantPrompt() {
+        AppSettings quietSettings;
+        quietSettings.soundEnabled = false;
+        quietSettings.normalize();
+        SettingsRepository repository;
+        repository.setData(quietSettings.toJson());
+        DataPaths::ensureDirectories();
+        QVERIFY(repository.save(DataPaths::settingsFile()));
+
+        GameEngine engine;
+        AccessibilityService accessibility;
+        MainWindow window(engine, accessibility);
+        window.show();
+        QVERIFY(QTest::qWaitForWindowActive(&window));
+        QTest::keyClick(&window, Qt::Key_F1);
+        QCOMPARE(engine.state().phase(), GamePhase::Bidding);
+
+        auto& fullState = engine.state().fullState();
+        fullState.currentPlayer = PlayerId::Player1;
+        fullState.highestBid = 0;
+        fullState.highestBidder = PlayerId::Player1;
+        fullState.biddingPlayerCount = 0;
+        for (auto& player : fullState.players) {
+            player.bidScore = 0;
+            player.hasPassedBid = false;
+        }
+        window.refreshFromState();
+
+        auto* statusLabel = window.statusBar()->findChild<QLabel*>();
+        QVERIFY(statusLabel);
+        QTest::keyClick(&window, Qt::Key_3);
+        QCOMPARE(engine.state().phase(), GamePhase::Playing);
+        const QString publicCardsAnnouncement = statusLabel->accessibleName();
+        QVERIFY(publicCardsAnnouncement.startsWith(QString::fromUtf8(u8"地主已经确定。公开底牌：")));
+        QVERIFY(publicCardsAnnouncement.endsWith(QString::fromUtf8(u8"。地主先出牌")));
+
+        QTest::qWait(6200);
+        QCOMPARE(statusLabel->accessibleName(), publicCardsAnnouncement);
+        QVERIFY(!statusLabel->text().contains(QString::fromUtf8(u8"叫分结束")));
+
+        AppSettings defaults;
+        defaults.normalize();
+        repository.setData(defaults.toJson());
+        QVERIFY(repository.save(DataPaths::settingsFile()));
+        engine.state().setPhase(GamePhase::NotStarted);
+        window.close();
+    }
+
     void testPrimaryKeyboardShortcuts() {
         writeCustomPlayerNames();
         GameEngine engine;
@@ -1968,9 +2026,10 @@ private slots:
         QCOMPARE(statusLabel->text(), QString::fromUtf8(u8"Alt数字快捷键已取消"));
 
         QTest::keyClick(&window, Qt::Key_1);
-        QVERIFY(statusLabel->text().contains(QString::fromUtf8(u8"东风")));
-        QVERIFY(statusLabel->text().contains(QString::fromUtf8(u8"自己")));
-        QVERIFY(!statusLabel->text().contains(QString::fromUtf8(u8"玩家一")));
+        QCOMPARE(statusLabel->text(), QString::fromUtf8(u8"地主，还剩") +
+                 QString::number(fs.players[0].remainingCards()) + QString::fromUtf8(u8"张牌"));
+        QVERIFY(!statusLabel->text().contains(QString::fromUtf8(u8"东风")));
+        QVERIFY(!statusLabel->text().contains(QString::fromUtf8(u8"自己")));
         QTest::keyClick(&window, Qt::Key_2);
         QVERIFY(statusLabel->text().contains(QString::fromUtf8(u8"南风")));
         QVERIFY(!statusLabel->text().contains(QString::fromUtf8(u8"玩家二")));
@@ -1980,6 +2039,16 @@ private slots:
         QTest::keyClick(&window, Qt::Key_4);
         QVERIFY(statusLabel->text().contains(QString::fromUtf8(u8"北风")));
         QVERIFY(!statusLabel->text().contains(QString::fromUtf8(u8"玩家四")));
+
+        fs.players[0].role = Role::Farmer;
+        fs.players[1].role = Role::Landlord;
+        QTest::keyClick(&window, Qt::Key_2);
+        QCOMPARE(statusLabel->text(), QString::fromUtf8(u8"地主，还剩") +
+                 QString::number(fs.players[1].remainingCards()) + QString::fromUtf8(u8"张牌"));
+        QVERIFY(!statusLabel->text().contains(QString::fromUtf8(u8"南风")));
+        fs.players[0].role = Role::Landlord;
+        fs.players[1].role = Role::Farmer;
+
         QTest::keyClick(&window, Qt::Key_F2);
         QVERIFY(statusLabel->text().contains(QString::fromUtf8(u8"底牌")));
         QTest::keyClick(&window, Qt::Key_F, Qt::AltModifier);
@@ -2011,8 +2080,10 @@ private slots:
         QVERIFY(!containsForbiddenSpeech(statusLabel->text()));
         QTest::keyClick(&window, Qt::Key_Home);
         QCOMPARE(handView->currentIndex().row(), 0);
+        const int nextRankGroupRow = handModel->nextBrowsableGroupStartRow(0);
+        QVERIFY(nextRankGroupRow > 0);
         QTest::keyClick(&window, Qt::Key_Right, Qt::ShiftModifier);
-        QCOMPARE(handView->currentIndex().row(), 1);
+        QCOMPARE(handView->currentIndex().row(), nextRankGroupRow);
         QVERIFY(handView->selectionModel()->selectedIndexes().isEmpty());
         QVERIFY(!statusLabel->text().isEmpty());
         QVERIFY(!containsForbiddenSpeech(statusLabel->text()));
@@ -2091,6 +2162,8 @@ private slots:
         QCOMPARE(fs.players[0].hand.size(), handSizeBeforePass);
         QCOMPARE(fs.consecutivePasses, 1);
         QCOMPARE(fs.currentPlayer, PlayerId::Player2);
+        QTRY_COMPARE(statusLabel->accessibleName(), QString::fromUtf8(u8"地主"));
+        QVERIFY(!statusLabel->accessibleName().contains(QString::fromUtf8(u8"东风")));
         QVERIFY(!statusLabel->text().contains(QString::fromUtf8(u8"过牌")));
     }
 
@@ -2099,6 +2172,9 @@ private slots:
         writeCustomPlayerNames();
         GameEngine engine;
         engine.state().setPhase(GamePhase::Playing);
+        auto& fullState = engine.state().fullState();
+        fullState.players[0].role = Role::Farmer;
+        fullState.players[1].role = Role::Landlord;
         AccessibilityService accessibility;
         MainWindow window(engine, accessibility);
         window.show();
@@ -2111,7 +2187,8 @@ private slots:
         const HWND windowHandle = reinterpret_cast<HWND>(window.winId());
 
         QVERIFY(PostMessageW(windowHandle, keyboardHookMessage, '2', 0));
-        QTRY_VERIFY(statusLabel->text().contains(QString::fromUtf8(u8"南风")));
+        QTRY_COMPARE(statusLabel->text(), QString::fromUtf8(u8"地主，还剩0张牌"));
+        QVERIFY(!statusLabel->text().contains(QString::fromUtf8(u8"南风")));
 
         statusLabel->setText(QString::fromUtf8(u8"Alt数字快捷键已释放"));
         QVERIFY(PostMessageW(windowHandle, keyboardHookMessage, '2', altFlag));

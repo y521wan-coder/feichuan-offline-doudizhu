@@ -241,8 +241,8 @@ QString ShortcutSettings::actionName(ShortcutAction action) {
     case ReturnToMainScreen: return QString::fromUtf8(u8"返回主界面");
     case PreviousRankGroup: return QString::fromUtf8(u8"浏览上一个点数组");
     case NextRankGroup: return QString::fromUtf8(u8"浏览下一个点数组");
-    case PreviousCard: return QString::fromUtf8(u8"逐张浏览上一张牌");
-    case NextCard: return QString::fromUtf8(u8"逐张浏览下一张牌");
+    case PreviousCard: return QString::fromUtf8(u8"Shift浏览上一个点数组");
+    case NextCard: return QString::fromUtf8(u8"Shift浏览下一个点数组");
     case FirstRankGroup: return QString::fromUtf8(u8"跳到第一个点数组");
     case LastRankGroup: return QString::fromUtf8(u8"跳到最后一个点数组");
     case PickCard: return QString::fromUtf8(u8"拿起当前一张牌");
