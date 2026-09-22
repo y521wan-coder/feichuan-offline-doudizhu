@@ -117,12 +117,24 @@ FarmerTeamDecision FarmerTeamStrategy::selectCandidates(
     if (isLeader) {
         if (const auto* teammate = closestFinishingTeammate(observation)) {
             if (teammate->remainingCards == 1) {
-                decision.allowedMoveIndexes = indexesMatching(moves, [](const LegalMove& move) {
-                    return move.pattern.type == CardPatternType::Single &&
-                           rankWeight(move.pattern.mainRank) < rankWeight(Rank::Two);
-                });
+                const int teammateIndex = static_cast<int>(teammate->id);
+                const bool exactTeammateCardAvailable =
+                    observation.fullInformation.available && teammateIndex >= 0 &&
+                    teammateIndex < observation.publicState.activePlayerCount &&
+                    observation.fullInformation.allHands[teammateIndex].size() == 1;
+                const int teammateRank = exactTeammateCardAvailable
+                    ? rankWeight(observation.fullInformation.allHands[teammateIndex]
+                                     .cards().front().rank())
+                    : rankWeight(Rank::Two);
+                decision.allowedMoveIndexes = indexesMatching(moves,
+                    [&](const LegalMove& move) {
+                        return move.pattern.type == CardPatternType::Single &&
+                               rankWeight(move.pattern.mainRank) < teammateRank;
+                    });
                 if (!decision.allowedMoveIndexes.empty()) {
-                    decision.reasonCode = "feed_low_single_to_one_card_teammate";
+                    decision.reasonCode = exactTeammateCardAvailable
+                        ? "feed_safe_single_to_one_card_teammate"
+                        : "feed_low_single_to_one_card_teammate";
                     return decision;
                 }
             } else if (teammate->remainingCards == 2) {

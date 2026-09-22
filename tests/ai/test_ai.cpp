@@ -1,6 +1,9 @@
 #include <QtTest>
 #include <QJsonArray>
 #include <algorithm>
+#include <array>
+#include <chrono>
+#include <set>
 
 #include "ai/ai_level_profile.h"
 #include "ai/bidding_strategy.h"
@@ -32,29 +35,6 @@ bool containsResponse(const std::vector<LegalMove>& moves, CardPatternType type,
     return std::any_of(moves.begin(), moves.end(), [&](const LegalMove& move) {
         return move.pattern.type == type && move.pattern.mainRank == rank;
     });
-}
-
-QJsonObject swapBottomCardsWithNonBidderHand(QJsonObject saved, PlayerId bidder) {
-    QJsonArray players = saved["players"].toArray();
-    const int bidderIndex = static_cast<int>(bidder);
-    const int donorIndex = (bidderIndex + 1) % PLAYER_COUNT;
-    QJsonObject donor = players[donorIndex].toObject();
-    QJsonArray donorHand = donor["hand"].toArray();
-    QJsonArray bottomCards = saved["bottomCards"].toArray();
-
-    Q_ASSERT(bottomCards.size() == BOTTOM_CARDS);
-    Q_ASSERT(donorHand.size() >= BOTTOM_CARDS);
-    for (int index = 0; index < BOTTOM_CARDS; ++index) {
-        const QJsonValue originalBottomCard = bottomCards[index];
-        bottomCards[index] = donorHand[index];
-        donorHand[index] = originalBottomCard;
-    }
-
-    donor["hand"] = donorHand;
-    players[donorIndex] = donor;
-    saved["players"] = players;
-    saved["bottomCards"] = bottomCards;
-    return saved;
 }
 
 } // namespace
@@ -183,6 +163,15 @@ private slots:
         QCOMPARE(beginner.publicInferenceSamples, 0);
         QVERIFY(intermediate.publicInferenceSamples > beginner.publicInferenceSamples);
         QVERIFY(advanced.publicInferenceSamples > intermediate.publicInferenceSamples);
+        QCOMPARE(beginner.fullInformationRootCandidates, 2);
+        QCOMPARE(intermediate.fullInformationRootCandidates, 3);
+        QCOMPARE(advanced.fullInformationRootCandidates, 4);
+        QCOMPARE(beginner.fullInformationNodeBudget, 120);
+        QCOMPARE(intermediate.fullInformationNodeBudget, 500);
+        QCOMPARE(advanced.fullInformationNodeBudget, 7000);
+        QCOMPARE(beginner.rolloutPlies, 4);
+        QCOMPARE(intermediate.rolloutPlies, 8);
+        QCOMPARE(advanced.rolloutPlies, 20);
     }
 
     void testStrategicPlannerPrefersCompactHandDecomposition() {
@@ -249,7 +238,7 @@ private slots:
                  activeRisk);
     }
 
-    void testBiddingIgnoresInjectedHiddenBottomCards() {
+    void testPublicSnapshotCannotInjectHiddenBottomCards() {
         Hand hand;
         hand.addCards(sameRankCards(Rank::Two, 4));
         AiObservation first;
@@ -264,52 +253,147 @@ private slots:
         QCOMPARE(ai.decideBid(first).bidValue, ai.decideBid(second).bidValue);
     }
 
-    void testRestoredBiddingAiIgnoresHiddenBottomCards() {
+    void testFullInformationSnapshotsAndPublicSeparation() {
+        for (const int playerCount : {TWO_PLAYER_COUNT, THREE_PLAYER_COUNT, PLAYER_COUNT}) {
+            GameEngine engine;
+            GameCommand start;
+            start.type = GameCommandType::StartGame;
+            start.randomSeed = 4200 + playerCount;
+            start.playerCount = playerCount;
+            QVERIFY(engine.execute(start).success);
+            const auto observation = makeAiObservation(
+                engine.state(), engine.fullState().currentPlayer);
+
+            QVERIFY(observation.fullInformation.available);
+            QVERIFY(observation.publicState.bottomCards.empty());
+            QVERIFY(!observation.publicState.bottomCardsRevealed);
+            QCOMPARE(static_cast<int>(observation.fullInformation.hiddenBottomCards.size()),
+                     bottomCardsForPlayerCount(playerCount));
+            QCOMPARE(static_cast<int>(observation.fullInformation.setAsideCards.size()),
+                     playerCount == TWO_PLAYER_COUNT ? TWO_PLAYER_SET_ASIDE_CARDS : 0);
+
+            std::set<int> cardIds;
+            for (int index = 0; index < PLAYER_COUNT; ++index) {
+                const int expected = index < playerCount
+                    ? cardsPerPlayerForPlayerCount(playerCount) : 0;
+                QCOMPARE(observation.fullInformation.allHands[index].size(), expected);
+                for (const auto& card : observation.fullInformation.allHands[index].cards()) {
+                    QVERIFY(card.isValid());
+                    QVERIFY(card.id() < totalCardsForPlayerCount(playerCount));
+                    QVERIFY(cardIds.insert(card.id()).second);
+                }
+            }
+            for (const auto& card : observation.fullInformation.hiddenBottomCards) {
+                QVERIFY(cardIds.insert(card.id()).second);
+            }
+            for (const auto& card : observation.fullInformation.setAsideCards) {
+                QVERIFY(cardIds.insert(card.id()).second);
+            }
+            QCOMPARE(static_cast<int>(cardIds.size()),
+                     totalCardsForPlayerCount(playerCount));
+        }
+    }
+
+    void testFullInformationBottomChangesAdvancedBid() {
+        AiObservation weak;
+        weak.playerId = PlayerId::Player1;
+        weak.phase = GamePhase::Bidding;
+        weak.publicState.activePlayerCount = THREE_PLAYER_COUNT;
+        weak.ownHand.addCard(Card::create(Rank::Three, Suit::Spades, 0));
+        weak.fullInformation.available = true;
+        weak.fullInformation.allHands[0] = weak.ownHand;
+        weak.fullInformation.allHands[1].addCard(
+            Card::create(Rank::Four, Suit::Spades, 0));
+        weak.fullInformation.allHands[2].addCard(
+            Card::create(Rank::Five, Suit::Spades, 0));
+        weak.fullInformation.hiddenBottomCards = {
+            Card::create(Rank::Four, Suit::Hearts, 0),
+            Card::create(Rank::Five, Suit::Hearts, 0),
+            Card::create(Rank::Six, Suit::Hearts, 0)};
+        AiObservation strong = weak;
+        strong.fullInformation.hiddenBottomCards = {
+            Card::create(Rank::Two, Suit::Spades, 0),
+            Card::create(Rank::SmallJoker, Suit::None, 0),
+            Card::create(Rank::BigJoker, Suit::None, 0)};
+
+        StandardAiPlayer ai(AiDifficulty::Advanced);
+        const int weakBid = ai.decideBid(weak).bidValue;
+        const int strongBid = ai.decideBid(strong).bidValue;
+        QVERIFY2(strongBid > weakBid,
+                 "Exact hidden bottom cards must be able to change advanced bidding.");
+    }
+
+    void testOpponentHandsCanChangeAdvancedPlayDecision() {
+        StandardAiPlayer ai(AiDifficulty::Advanced);
+        bool foundChangedDecision = false;
+        for (int seed = 1; seed <= 80 && !foundChangedDecision; ++seed) {
+            GameEngine engine;
+            GameCommand start;
+            start.type = GameCommandType::StartGame;
+            start.randomSeed = 880000 + seed;
+            start.playerCount = THREE_PLAYER_COUNT;
+            QVERIFY(engine.execute(start).success);
+            int bidActions = 20;
+            while (engine.state().phase() == GamePhase::Bidding && bidActions-- > 0) {
+                const auto bidder = engine.fullState().currentPlayer;
+                QVERIFY(engine.execute(ai.decideBid(engine.state(), bidder)).success);
+            }
+            QCOMPARE(engine.state().phase(), GamePhase::Playing);
+            const auto landlord = engine.fullState().currentPlayer;
+            auto first = makeAiObservation(engine.state(), landlord);
+            auto second = first;
+            const int own = static_cast<int>(landlord);
+            std::array<int, 2> opponents{};
+            int opponentCount = 0;
+            for (int index = 0; index < THREE_PLAYER_COUNT; ++index) {
+                if (index != own) opponents[opponentCount++] = index;
+            }
+            std::swap(second.fullInformation.allHands[opponents[0]],
+                      second.fullInformation.allHands[opponents[1]]);
+            QVERIFY(first.ownHand.cards() == second.ownHand.cards());
+            QCOMPARE(first.publicState.actionHistory.size(),
+                     second.publicState.actionHistory.size());
+            for (int index = 0; index < PLAYER_COUNT; ++index) {
+                QCOMPARE(first.publicState.players[index].remainingCards,
+                         second.publicState.players[index].remainingCards);
+            }
+            const auto firstCommand = ai.decidePlay(first);
+            const auto secondCommand = ai.decidePlay(second);
+            foundChangedDecision = firstCommand.type != secondCommand.type ||
+                firstCommand.cardIds != secondCommand.cardIds;
+        }
+        QVERIFY2(foundChangedDecision,
+                 "Changing only real opponent hands must be able to change the play decision.");
+    }
+
+    void testDecisionDeadlinesReturnLegalCommands() {
         GameEngine engine;
         GameCommand start;
         start.type = GameCommandType::StartGame;
-        start.randomSeed = 42;
+        start.randomSeed = 99123;
+        start.playerCount = PLAYER_COUNT;
         QVERIFY(engine.execute(start).success);
-
-        const PlayerId bidder = engine.fullState().currentPlayer;
-        QJsonObject firstSaved = engine.state().toJson();
-        firstSaved["bottomCardsRevealed"] = true;
-        QJsonObject secondSaved = swapBottomCardsWithNonBidderHand(firstSaved, bidder);
-
-        const GameState firstRestored = GameState::fromJson(firstSaved);
-        const GameState secondRestored = GameState::fromJson(secondSaved);
-        QVERIFY(firstRestored.fullState().bottomCards !=
-                secondRestored.fullState().bottomCards);
-        QCOMPARE(static_cast<int>(firstRestored.fullState().bottomCards.size()),
-                 BOTTOM_CARDS);
-        QCOMPARE(static_cast<int>(secondRestored.fullState().bottomCards.size()),
-                 BOTTOM_CARDS);
-
-        const AiObservation first = makeAiObservation(firstRestored, bidder);
-        const AiObservation second = makeAiObservation(secondRestored, bidder);
-        QCOMPARE(first.phase, GamePhase::Bidding);
-        QCOMPARE(second.phase, GamePhase::Bidding);
-        QVERIFY(first.ownHand.cards() == second.ownHand.cards());
-        QCOMPARE(first.decisionSeed, second.decisionSeed);
-        QCOMPARE(first.highestBid, second.highestBid);
-        QCOMPARE(first.publicState.gameId, second.publicState.gameId);
-        QCOMPARE(first.publicState.currentPlayer, second.publicState.currentPlayer);
-        QVERIFY(!first.publicState.bottomCardsRevealed);
-        QVERIFY(!second.publicState.bottomCardsRevealed);
-        QVERIFY(first.publicState.bottomCards.empty());
-        QVERIFY(second.publicState.bottomCards.empty());
-        for (int index = 0; index < PLAYER_COUNT; ++index) {
-            QCOMPARE(first.publicState.players[index].remainingCards,
-                     second.publicState.players[index].remainingCards);
+        StandardAiPlayer bidding(AiDifficulty::Advanced);
+        while (engine.state().phase() == GamePhase::Bidding) {
+            const auto player = engine.fullState().currentPlayer;
+            QVERIFY(engine.execute(bidding.decideBid(engine.state(), player)).success);
         }
-
-        StandardAiPlayer ai(AiDifficulty::Advanced);
-        const GameCommand firstBid = ai.decideBid(first);
-        const GameCommand secondBid = ai.decideBid(second);
-        QCOMPARE(firstBid.type, secondBid.type);
-        QCOMPARE(firstBid.playerId, secondBid.playerId);
-        QCOMPARE(firstBid.bidValue, secondBid.bidValue);
-        QCOMPARE(firstBid.aiDecisionReason, secondBid.aiDecisionReason);
+        for (const auto difficulty : {AiDifficulty::Beginner,
+                                      AiDifficulty::Intermediate,
+                                      AiDifficulty::Advanced}) {
+            StandardAiPlayer ai(difficulty);
+            const auto player = engine.fullState().currentPlayer;
+            const auto started = std::chrono::steady_clock::now();
+            const auto command = ai.decidePlay(engine.state(), player);
+            const double elapsed = std::chrono::duration<double, std::milli>(
+                std::chrono::steady_clock::now() - started).count();
+            QVERIFY(!command.cardIds.empty() || command.type == GameCommandType::Pass);
+            QVERIFY2(elapsed <= ai.decisionBudgetMilliseconds() + 100.0,
+                     "AI exceeded its hard deadline tolerance.");
+            GameEngine copy = engine;
+            QVERIFY2(copy.execute(command).success,
+                     "Deadline fallback must remain a legal command.");
+        }
     }
 };
 

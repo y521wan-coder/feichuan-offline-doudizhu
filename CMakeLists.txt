@@ -66,6 +66,7 @@ add_library(fpdz_ai STATIC
     src/ai/standard_ai.cpp
     src/ai/strategic_search_evaluator.cpp
     src/ai/imperfect_information_search.cpp
+    src/ai/full_information_search.cpp
     src/ai/hint_service.cpp
 )
 target_include_directories(fpdz_ai PUBLIC "${CMAKE_SOURCE_DIR}/src")

@@ -2,6 +2,7 @@
 
 #include "ai_difficulty.h"
 #include "ai_level_profile.h"
+#include "ai_player.h"
 #include "../core/model/hand.h"
 
 #include <cstdint>
@@ -16,7 +17,9 @@ public:
     static int decideBid(const Hand& hand, int currentHighestBid,
                          AiDifficulty difficulty = AiDifficulty::Beginner,
                          uint64_t randomSalt = 0,
-                         int activePlayerCount = PLAYER_COUNT);
+                         int activePlayerCount = PLAYER_COUNT,
+                         const AiFullInformation* fullInformation = nullptr,
+                         PlayerId bidder = PlayerId::Player1);
 };
 
 } // namespace fpdz

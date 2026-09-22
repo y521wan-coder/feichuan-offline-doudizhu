@@ -5,6 +5,7 @@ out/
 cmake-build-*/
 portable/
 artifacts/portable-current/
+artifacts/ai-validation-*/
 Qt/
 reference/
 private/

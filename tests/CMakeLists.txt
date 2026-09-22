@@ -140,6 +140,9 @@ fpdz_add_test(test_ai_strength
     SOURCES ai/test_ai_strength.cpp
     LIBS fpdz_core fpdz_ai
 )
+add_executable(ai_validation_runner ai/ai_validation_runner.cpp)
+target_link_libraries(ai_validation_runner PRIVATE fpdz_core fpdz_ai Qt6::Core)
+target_include_directories(ai_validation_runner PRIVATE "${CMAKE_SOURCE_DIR}/src")
 set_tests_properties(test_ai PROPERTIES
     TIMEOUT 900
     ENVIRONMENT "QTEST_FUNCTION_TIMEOUT=900000"

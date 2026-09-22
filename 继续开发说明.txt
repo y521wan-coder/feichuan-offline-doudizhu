@@ -1,5 +1,5 @@
 飞船单机斗地主——继续开发说明
-更新时间：2026-09-21
+更新时间：2026-09-22
 项目：D:\飞船单机斗地主
 仓库：https://github.com/y521wan-coder/feichuan-offline-doudizhu
 
@@ -11,25 +11,31 @@
 
 二、正式状态
 
-- 正式版 1.6（Windows 文件版本 1.6.0.0）；更新服务器 `windows/stable/1.6`，Release ID 68，`status=published`。下次必须从 1.7 开始。
-- 安装包：`releases\飞船单机斗地主-Setup-1.6.exe`，61,991,701 字节，SHA-256 `82D2D23189BA73E5400FC5B854B2C0A168593117682861949A87D319203CBBFF`，Authenticode `NotSigned`。
-- 固定公钥清单：`releases\飞船单机斗地主-Setup-1.6.release-manifest.json`；密钥 ID `898098f7c562190b1bae909422cf7b5ef09a34bc3e400110fa18cc65a77ff81a`。服务器回下载大小、哈希和签名一致（`SERVER_VERIFICATION=OK`）。D 盘根目录有同哈希安装包副本。
-- 构建主程序：842,240 字节，SHA-256 `B529EE3BDC4E59794468BA6B0E478CC96AD96CA8E052224BAE7A5B08FBB8DF09`；更新器：72,192 字节，SHA-256 `9923F68FE9AA61E8DAAC33AC633B88920911214FD9B12141197DF67DB4A99011`。主程序不依赖 Qt6Network，只有更新器联网。
-- 安装目录仍为 1.4；个人桌面“飞船单机斗地主-AI测试版”指向构建目录 1.6，公共桌面正式快捷方式指向安装目录。用户已实战确认 1.6 AI 增强完美；未执行 1.6 覆盖/全新安装、卸载、用户数据保留及完整四读屏联合验收，不得写成通过。
+- 正式版 1.7（Windows 文件版本 1.7.0.0）；更新服务器 `windows/stable/1.7`，Release ID 69，`status=published`。下次必须从 1.8 开始。
+- 安装包：`releases\飞船单机斗地主-Setup-1.7.exe`，61,994,721 字节，SHA-256 `FA2B542FF68CF7C47697D5A7543C8CA2AF7A1051BAAAC1CD258BA2EFCD134A86`，VersionInfo 1.7.0，Authenticode `NotSigned`。
+- 固定公钥清单：`releases\飞船单机斗地主-Setup-1.7.release-manifest.json`；密钥 ID `898098f7c562190b1bae909422cf7b5ef09a34bc3e400110fa18cc65a77ff81a`。服务器回下载大小、SHA-256 和签名一致（`SERVER_VERIFICATION=OK`）。
+- 打包构建主程序：852,992 字节，SHA-256 `4392CEC79CC0F68192BF1F1C2230EE5FB1FAFFBC66D8D19BD867A5DC555CF659`；更新器：72,192 字节，SHA-256 `C0785E7DB8310356917BF84A1881F8AC11F6B49D467211491228815022A101DF`，文件版本均为 1.7.0.0。主程序不依赖 Qt6Network，只有更新器联网。注意 MSVC 链接会写入时间戳，同一份源码两次构建大小相同而哈希不同，PE 哈希只能用于比对同一次构建。
+- 本机安装目录 `C:\Program Files\飞船单机斗地主` 已由 1.4 静默覆盖安装为 1.7（退出码 0）：游戏与更新器哈希与打包构建逐字节一致，NVDA DLL 与 LGPL 许可证就位，安装目录前后同为 196 个文件，公共桌面快捷方式唯一且指向安装目录主程序，用户设置、统计、日志哈希未变，主程序隐藏窗口 5 秒启动检查通过。
+- 尚未执行、不得写成通过：1.7 卸载与全新安装、NVDA/讲述人/争渡/保益四种读屏软件完整人工验收、物理键盘钩子人工实测、公开 CA Authenticode 签名，以及 1.7 对 1.6 的同种子强度对照。
 
-三、产品与 1.6 AI
+三、产品与 1.7 AI
 
 - Windows x64、Qt Widgets、完全本地单机；二人/三人一副牌，四人两副牌。只有初级、中级、高级三档 AI。
-- 1.6 只增强 AI：在原合法动作、本家拆牌和农民硬规则之后，`ImperfectInformationSearch` 仅用 `AiObservation` 的本家手牌与公共信息生成可能牌局，模拟整桌接牌、过牌、牌权和残局对抗。新增公开原因码 `strategic_pass_for_teammate_finish`。
-- 真实暗牌、洗牌结果、未来信息、`GameState`/`FullGameState` 不得进入 AI；二人 17 张盖牌永不进入状态、快照或玩家样本。三档共用农民强制协作规则，差异只能来自搜索预算、深度、候选数、公开推断和安全随机度。
-- 同种子 100 局角色对照（中级→高级）：二人地主 58→78、农民 42→56；三人地主 44→51、农民 56→70；四人地主 14→22、农民 86→90。最慢高级决策约 135.789 ms。三级各 10000 局正式报告仍未完成。
+- 1.7 为全知 AI：`AiObservation` 新增 `AiFullInformation`（真实整桌手牌、真实底牌、二人模式在局外的 17 张盖牌），`makeAiObservation` 逐张校验牌 ID 合法、不重复、不超过当前人数牌堆容量，二人模式另校验盖牌恰好 17 张，失败即 `available=false`，全知推演整体退出。
+- 新增 `src/ai/full_information_search.h/.cpp`，作为默认整桌推演器：在复制牌桌上做带硬截止时间和节点预算的同队极大/敌队极小搜索加有限轮次推演，总剩余牌不超过 `activePlayerCount * 6 + 2` 时切换为更深的残局搜索，候选按难度裁剪，推演内部继续套用农民强制协作规则。`StandardAiPlayer(AiDifficulty, AiInformationMode)` 默认 `FullInformation`；`ImperfectInformationSearch` 保留为 `PublicInference` 显式测试模式。
+- 叫分新增全知分支：有全知信息时用“本家手牌加真实底牌”的牌力减去最强真实对手牌力，替代旧的假设底牌抽样。队友只剩一张且已知确切点数时，用真实可被压过的上限喂牌，原因码 `feed_safe_single_to_one_card_teammate`；未知点数时仍用原来的低单牌规则。
+- 难度参数（预算毫秒/搜索深度/候选裁剪/全知根候选/节点预算/推演轮数/安全随机度）：初级 150/1/8/2/120/4/0.35，中级 450/2/24/3/500/8/0.10，高级 1000/4/64/4/7000/20/0。团队强制规则三级完全一致。
+- 真人可见范围不变：可视牌桌、朗读和公告仍只依据公共快照、真人手牌和选中牌；全知内容不写入公共快照、可视牌桌、朗读文本、回放、统计、界面文字或诊断日志。
+- 正式稳定性模拟：二人/三人/四人 × 初级/中级/高级各 10000 局，共 120,000 局全部正常结束，`illegal`、`unfinished`、`duplicate_deals`、`set_aside_played`、`teammate_bombs` 全为 0；最慢单次决策 215.171 毫秒（四人高级）。原始输出在 `artifacts\ai-validation-1.7\`（该目录已加入 .gitignore，不作为提交内容）。
+- 强度结论：本轮只验证合法性、可结束性与协作硬规则，未重跑同种子强度对照，不得声称 1.7 比 1.6 更强。
 
 四、不可变边界
 
 - 不得恢复 Master/大师、模型文件、训练、检查点、模型晋级或训练中心通信；不得新增账号、匹配、真人联机或云牌局。
+- AI 仍只能经 `AiObservation` 取值，不得持有 `GameState`、`FullGameState`、洗牌种子或未来牌序；全知内容不得进入公共快照、可视牌桌、朗读、回放、统计、界面文字或诊断日志。
 - 主程序、core、ai、ui 不得链接 Qt Network；联网只属于独立更新器。
 - 未完成无障碍回归前不得重做 Qt Widgets、焦点、UIA、朗读或键盘架构。现有 NVDA、保益、争渡私有接口优先，讲述人使用标准 UIA Announcement，最后才是 Qt/UIA 焦点兜底。
-- 叫分期隐藏底牌；地主确定后才公开。可视牌桌只能接收公共快照、真人手牌和选中牌 ID。
+- 叫分期底牌对真人隐藏，地主确定后才公开。可视牌桌只能接收公共快照、真人手牌和选中牌 ID。
 - 大键盘 1/2/3/4 查询玩家；真人叫分时 0/1/2/3 优先；Alt+数字不是游戏键。快捷键规格见 `docs\快捷键规格.md`。
 - 新增第三方内容须登记来源、许可证、用途和文件范围。私钥、密码、Token、DPAPI 数据、服务器配置和 SSH 密钥不得进入仓库、文档、日志或聊天。
 
@@ -39,8 +45,8 @@
 - 增量：`.\tools\build.ps1 -Preset release-x64 -Build -Test`
 - 全量：`.\tools\build.ps1 -Preset release-x64 -Configure -Build -Test`
 - 安装包：`.\tools\build_release.ps1 -Package`
-- 1.6 首次完整 CTest 19/19（218.53 秒）；正式打包再次 19/19（220.15 秒）。高级 500/500 正常结束、零非法命令；农民协作 11/11 通过。用户要求发布阶段不再重复测试。
-- 修改规则或 AI 必须增加只从公共观察构造的确定性测试；修改键盘/朗读须检查 Qt、native message、低级钩子、UIA 和复读路径。AI 日志不得记录暗牌。
+- 1.7 首次完整 CTest 19/19（154.69 秒）；正式打包再次 19/19（154.48 秒）。日志见 `logs\build-1.7-full.txt` 与 `logs\build-release-1.7-package.txt`。
+- 修改规则或 AI 必须补充只经 `AiObservation` 构造的确定性测试（覆盖全知输入一致性、非法全知输入被拒绝、相同输入产生相同决策）；修改键盘或朗读须检查 Qt、native message、低级钩子、UIA 和复读路径。AI 日志不得记录暗牌。
 
 六、以后发布
 

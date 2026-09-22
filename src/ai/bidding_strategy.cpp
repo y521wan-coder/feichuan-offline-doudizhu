@@ -88,10 +88,28 @@ double expectedBottomImprovement(const Hand& hand, const AiLevelProfile& profile
 
 int BiddingStrategy::decideBid(const Hand& hand, int currentHighestBid,
                                AiDifficulty difficulty, uint64_t randomSalt,
-                               int activePlayerCount) {
+                               int activePlayerCount,
+                               const AiFullInformation* fullInformation,
+                               PlayerId bidder) {
     const auto& profile = aiLevelProfile(difficulty);
     double score = structuralScore(hand.cards());
-    if (difficulty == AiDifficulty::Advanced) {
+    if (fullInformation && fullInformation->available) {
+        auto landlordCards = hand.cards();
+        landlordCards.insert(landlordCards.end(),
+                             fullInformation->hiddenBottomCards.begin(),
+                             fullInformation->hiddenBottomCards.end());
+        const int landlordStrength = structuralScore(landlordCards);
+        int strongestOpponent = 0;
+        for (int index = 0; index < activePlayerCount; ++index) {
+            if (index == static_cast<int>(bidder)) continue;
+            strongestOpponent = std::max(strongestOpponent,
+                structuralScore(fullInformation->allHands[index].cards()));
+        }
+        // Exact bottom improvement and the strongest real defender replace
+        // the old hypothetical-bottom sampling in production decisions.
+        score = landlordStrength - strongestOpponent * 0.42;
+        score += (landlordStrength - structuralScore(hand.cards())) * 0.35;
+    } else if (difficulty == AiDifficulty::Advanced) {
         score += expectedBottomImprovement(hand, profile, randomSalt,
                                            activePlayerCount) * 0.45;
     }

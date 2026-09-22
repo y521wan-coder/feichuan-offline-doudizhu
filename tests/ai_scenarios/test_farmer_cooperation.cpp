@@ -129,7 +129,7 @@ private slots:
                  std::string("feed_low_single_to_one_card_teammate"));
     }
 
-    void invisibleHandsCannotChangeDecision() {
+    void identicalFullStateProducesIdenticalDecision() {
         const auto observation = farmerObservation(
             handOf({{Rank::Five, 1}, {Rank::Nine, 1}}), cards(Rank::Four, 1),
             PlayerId::Player4);
@@ -139,6 +139,24 @@ private slots:
         QCOMPARE(first.type, second.type);
         QCOMPARE(first.cardIds, second.cardIds);
         QCOMPARE(first.aiDecisionReason, second.aiDecisionReason);
+    }
+
+    void feedsSingleKnownToBeBeatableByTeammate() {
+        auto observation = farmerObservation(
+            handOf({{Rank::Three, 1}, {Rank::Nine, 1}, {Rank::Two, 1}}), {},
+            PlayerId::Player3, 8, 1);
+        observation.fullInformation.available = true;
+        observation.fullInformation.allHands[1] = observation.ownHand;
+        observation.fullInformation.allHands[2].addCard(
+            Card::create(Rank::Six, Suit::Hearts, 0));
+        observation.fullInformation.allHands[3] = handOf({{Rank::Four, 1}, {Rank::Ace, 1}});
+
+        StandardAiPlayer ai(AiDifficulty::Advanced);
+        const auto command = ai.decidePlay(observation);
+        QCOMPARE(command.type, GameCommandType::PlayCards);
+        QCOMPARE(playedRank(command), Rank::Three);
+        QCOMPARE(command.aiDecisionReason,
+                 std::string("feed_safe_single_to_one_card_teammate"));
     }
 
     void strategicallyPassesForNextFarmerToFinish() {
@@ -183,6 +201,13 @@ private slots:
             }
         }
         observation.publicState.actionHistory.push_back(std::move(publicHistory));
+        observation.fullInformation.available = true;
+        observation.fullInformation.allHands[0].addCards({
+            Card::create(Rank::Six, Suit::Spades, 0),
+            Card::create(Rank::Seven, Suit::Spades, 0)});
+        observation.fullInformation.allHands[1] = observation.ownHand;
+        observation.fullInformation.allHands[2].addCard(
+            Card::create(Rank::Eight, Suit::Spades, 0));
 
         StandardAiPlayer ai(AiDifficulty::Advanced);
         const auto command = ai.decidePlay(observation);

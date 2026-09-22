@@ -2,6 +2,7 @@
 
 #include "bidding_strategy.h"
 #include "farmer_team_strategy.h"
+#include "full_information_search.h"
 #include "imperfect_information_search.h"
 #include "landlord_strategy.h"
 #include "strategic_search_evaluator.h"
@@ -61,8 +62,9 @@ int publicRankPlayedCount(const PublicGameSnapshot& state, Rank rank) {
 
 } // namespace
 
-StandardAiPlayer::StandardAiPlayer(AiDifficulty difficulty)
-    : m_profile(aiLevelProfile(difficulty)) {}
+StandardAiPlayer::StandardAiPlayer(AiDifficulty difficulty,
+                                   AiInformationMode informationMode)
+    : m_profile(aiLevelProfile(difficulty)), m_informationMode(informationMode) {}
 
 GameCommand StandardAiPlayer::decideBid(const AiObservation& observation) {
     GameCommand command;
@@ -70,8 +72,12 @@ GameCommand StandardAiPlayer::decideBid(const AiObservation& observation) {
     command.playerId = observation.playerId;
     command.bidValue = BiddingStrategy::decideBid(
         observation.ownHand, observation.highestBid, m_profile.level,
-        observation.decisionSeed, observation.publicState.activePlayerCount);
-    command.aiDecisionReason = "bid_from_own_hand";
+        observation.decisionSeed, observation.publicState.activePlayerCount,
+        m_informationMode == AiInformationMode::FullInformation
+            ? &observation.fullInformation : nullptr,
+        observation.playerId);
+    command.aiDecisionReason = m_informationMode == AiInformationMode::FullInformation
+        ? "bid_from_full_information" : "bid_from_public_inference";
     return command;
 }
 
@@ -124,7 +130,7 @@ GameCommand StandardAiPlayer::decidePlay(const AiObservation& observation) {
     struct ScoredMove {
         std::size_t index = 0;
         int score = std::numeric_limits<int>::min();
-        std::optional<int> publicSearchScore;
+        std::optional<int> tableSearchScore;
     };
     std::vector<ScoredMove> scoredMoves;
     scoredMoves.reserve(candidateIndexes.size());
@@ -169,10 +175,11 @@ GameCommand StandardAiPlayer::decidePlay(const AiObservation& observation) {
 
         // The bounded planner compares complete future hand decompositions, so
         // attachments, sequence preservation and control-card reserves are
-        // evaluated together instead of one move at a time. Public inference
-        // samples only cards consistent with AiObservation's public facts.
+        // evaluated together instead of one move at a time.
         score += strategicSearch.handPlanAdjustment(remaining);
-        score += strategicSearch.publicInformationAdjustment(move, remaining, isLeader);
+        if (m_informationMode == AiInformationMode::PublicInference) {
+            score += strategicSearch.publicInformationAdjustment(move, remaining, isLeader);
+        }
 
         score += publicRankPlayedCount(observation.publicState, move.pattern.mainRank) * 2;
         score += ownRole == Role::Farmer
@@ -202,24 +209,32 @@ GameCommand StandardAiPlayer::decidePlay(const AiObservation& observation) {
     }
     scoredMoves.resize(planningLimit);
 
-    // In tactically relevant positions, compare the best shape candidates by
-    // actually rotating the table through public-information deal samples.
-    // This is deliberately downstream of the shared farmer safety filter.
+    // Compare the best shape candidates by rotating the complete copied table.
+    // The legacy public-inference search remains reachable only through the
+    // explicit test mode. Both paths are downstream of farmer safety rules.
     std::sort(scoredMoves.begin(), scoredMoves.end(),
         [](const ScoredMove& left, const ScoredMove& right) {
             if (left.score != right.score) return left.score > right.score;
             return left.index < right.index;
         });
+    FullInformationSearch fullSearch(observation, m_profile);
     ImperfectInformationSearch publicSearch(observation, m_profile);
-    if (publicSearch.active()) {
+    const bool useFullSearch = m_informationMode == AiInformationMode::FullInformation &&
+        fullSearch.active();
+    const bool usePublicSearch = m_informationMode == AiInformationMode::PublicInference &&
+        publicSearch.active();
+    if (useFullSearch || usePublicSearch) {
         const int rolloutLimit = std::min(
             static_cast<int>(scoredMoves.size()),
-            m_profile.level == AiDifficulty::Advanced ? 4 : 2);
+            useFullSearch ? m_profile.fullInformationRootCandidates
+                          : (m_profile.level == AiDifficulty::Advanced ? 4 : 2));
         for (int position = 0; position < rolloutLimit; ++position) {
             auto& scored = scoredMoves[position];
-            scored.publicSearchScore = publicSearch.scoreMove(moves[scored.index]);
-            if (scored.publicSearchScore.has_value()) {
-                scored.score += *scored.publicSearchScore / 2;
+            scored.tableSearchScore = useFullSearch
+                ? fullSearch.scoreMove(moves[scored.index])
+                : publicSearch.scoreMove(moves[scored.index]);
+            if (scored.tableSearchScore.has_value()) {
+                scored.score += *scored.tableSearchScore / 2;
             }
         }
         scoredMoves.resize(rolloutLimit);
@@ -256,7 +271,7 @@ GameCommand StandardAiPlayer::decidePlay(const AiObservation& observation) {
     // result. This is not used to overtake a teammate and does not weaken the
     // existing mandatory one-card-landlord interception rule.
     if (!isLeader && ownRole == Role::Farmer && lastRole == Role::Landlord &&
-        publicSearch.active()) {
+        (useFullSearch || usePublicSearch)) {
         const int ownIndex = static_cast<int>(observation.playerId);
         const int nextIndex = (ownIndex + 1) % observation.publicState.activePlayerCount;
         const auto& nextPlayer = observation.publicState.players[nextIndex];
@@ -264,13 +279,14 @@ GameCommand StandardAiPlayer::decidePlay(const AiObservation& observation) {
             static_cast<int>(observation.publicState.lastPlayedBy)].remainingCards;
         if (nextPlayer.role == Role::Farmer && nextPlayer.remainingCards <= 2 &&
             landlordCards > 1) {
-            const auto passScore = publicSearch.scorePass();
+            const auto passScore = useFullSearch
+                ? fullSearch.scorePass() : publicSearch.scorePass();
             const bool forcedTeammateFinish = passScore.has_value() &&
-                selected->publicSearchScore.has_value() && *passScore >= 11000 &&
-                *passScore >= *selected->publicSearchScore;
+                selected->tableSearchScore.has_value() && *passScore >= 11000 &&
+                *passScore >= *selected->tableSearchScore;
             const bool materiallySaferPass = passScore.has_value() &&
-                selected->publicSearchScore.has_value() &&
-                *passScore > *selected->publicSearchScore +
+                selected->tableSearchScore.has_value() &&
+                *passScore > *selected->tableSearchScore +
                     (m_profile.level == AiDifficulty::Advanced ? 150 : 350);
             if (forcedTeammateFinish || materiallySaferPass) {
                 command.type = GameCommandType::Pass;

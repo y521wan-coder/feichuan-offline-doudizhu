@@ -10,6 +10,9 @@ struct AiLevelProfile {
     int searchDepth;
     int candidateLimit;
     int publicInferenceSamples;
+    int fullInformationRootCandidates;
+    int fullInformationNodeBudget;
+    int rolloutPlies;
     double safeChoiceRandomness;
 };
 

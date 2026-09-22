@@ -6,9 +6,16 @@
 
 namespace fpdz {
 
+enum class AiInformationMode {
+    PublicInference,
+    FullInformation
+};
+
 class StandardAiPlayer : public AiPlayer {
 public:
-    explicit StandardAiPlayer(AiDifficulty difficulty = AiDifficulty::Intermediate);
+    explicit StandardAiPlayer(AiDifficulty difficulty = AiDifficulty::Intermediate,
+                              AiInformationMode informationMode =
+                                  AiInformationMode::FullInformation);
 
     using AiPlayer::decideBid;
     using AiPlayer::decidePlay;
@@ -21,6 +28,7 @@ public:
 
 private:
     AiLevelProfile m_profile;
+    AiInformationMode m_informationMode;
 };
 
 } // namespace fpdz
