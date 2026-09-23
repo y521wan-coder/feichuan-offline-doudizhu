@@ -79,6 +79,17 @@ void appendRemainingPairs(std::vector<std::string>& files, const GameEvent& even
     }
 }
 
+void appendRemainingSingles(std::vector<std::string>& files, const GameEvent& event,
+                            int bodyCopies, bool humanUsesFemaleVoice) {
+    const auto counts = remainingCounts(event, bodyCopies);
+    for (int value = 0; value < RANK_COUNT; ++value) {
+        for (int copy = 0; copy < counts[static_cast<size_t>(value)]; ++copy) {
+            appendVoice(files, event.playerId, rankStem(static_cast<Rank>(value)),
+                        humanUsesFemaleVoice);
+        }
+    }
+}
+
 } // namespace
 
 CardPatternSoundPlan buildCardPatternSoundPlan(
@@ -97,6 +108,12 @@ CardPatternSoundPlan buildCardPatternSoundPlan(
     case CardPatternType::Triple:
         appendVoice(files, event.playerId, "three", humanUsesFemaleVoice);
         appendVoice(files, event.playerId, rank, humanUsesFemaleVoice);
+        break;
+    case CardPatternType::TripleWithSingle:
+        appendVoice(files, event.playerId, "three", humanUsesFemaleVoice);
+        appendVoice(files, event.playerId, rank, humanUsesFemaleVoice);
+        appendVoice(files, event.playerId, "to", humanUsesFemaleVoice);
+        appendRemainingSingles(files, event, 3, humanUsesFemaleVoice);
         break;
     case CardPatternType::TripleWithPair:
         appendVoice(files, event.playerId, "three", humanUsesFemaleVoice);
@@ -122,6 +139,21 @@ CardPatternSoundPlan buildCardPatternSoundPlan(
         appendBodyRange(files, event, humanUsesFemaleVoice);
         appendVoice(files, event.playerId, "plane", humanUsesFemaleVoice);
         appendRemainingPairs(files, event, 3, humanUsesFemaleVoice);
+        break;
+    case CardPatternType::AirplaneWithSingles:
+        appendBodyRange(files, event, humanUsesFemaleVoice);
+        appendVoice(files, event.playerId, "plane", humanUsesFemaleVoice);
+        appendRemainingSingles(files, event, 3, humanUsesFemaleVoice);
+        break;
+    case CardPatternType::FourWithTwoSingles:
+        appendVoice(files, event.playerId, "fourWithOne", humanUsesFemaleVoice);
+        appendVoice(files, event.playerId, rank, humanUsesFemaleVoice);
+        appendRemainingSingles(files, event, 4, humanUsesFemaleVoice);
+        break;
+    case CardPatternType::FourWithTwoPairs:
+        appendVoice(files, event.playerId, "fourWithTwoPairs", humanUsesFemaleVoice);
+        appendVoice(files, event.playerId, rank, humanUsesFemaleVoice);
+        appendRemainingPairs(files, event, 4, humanUsesFemaleVoice);
         break;
     case CardPatternType::Gun:
         appendVoice(files, event.playerId, rank, humanUsesFemaleVoice);
@@ -156,10 +188,6 @@ CardPatternSoundPlan buildCardPatternSoundPlan(
         appendVoice(files, event.playerId, "tianzun", humanUsesFemaleVoice);
         plan.effectFile = "card_four/tianzun.wav";
         break;
-    case CardPatternType::TripleWithSingle:
-    case CardPatternType::AirplaneWithSingles:
-    case CardPatternType::FourWithTwoSingles:
-    case CardPatternType::FourWithTwoPairs:
     case CardPatternType::Invalid:
         break;
     }

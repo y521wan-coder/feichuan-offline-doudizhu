@@ -19,12 +19,13 @@ void appendSameRank(std::vector<Card>& cards, Rank rank, int count) {
     }
 }
 
-GameEvent playedEvent(const std::vector<Card>& cards, PlayerId player = PlayerId::Player1) {
+GameEvent playedEvent(const std::vector<Card>& cards, PlayerId player = PlayerId::Player1,
+                      int playerCount = PLAYER_COUNT) {
     GameEvent event;
     event.type = GameEventType::CardsPlayed;
     event.playerId = player;
     event.cards = cards;
-    event.pattern = PatternAnalyzer::analyze(cards);
+    event.pattern = PatternAnalyzer::analyze(cards, playerCount);
     return event;
 }
 
@@ -143,6 +144,50 @@ private slots:
                               "card_four/girl/K.wav", "card_four/girl/plane.wav",
                               "card_four/girl/pair3.wav",
                               "card_four/girl/pair4.wav"}));
+    }
+
+    void testSingleDeckAddedPatternsUseExistingVoiceFiles() {
+        std::vector<Card> tripleWithSingle;
+        appendSameRank(tripleWithSingle, Rank::Three, 3);
+        appendSameRank(tripleWithSingle, Rank::Five, 1);
+        std::vector<Card> airplaneWithSingles;
+        appendSameRank(airplaneWithSingles, Rank::Three, 3);
+        appendSameRank(airplaneWithSingles, Rank::Four, 3);
+        appendSameRank(airplaneWithSingles, Rank::Five, 1);
+        appendSameRank(airplaneWithSingles, Rank::Six, 1);
+        std::vector<Card> fourWithTwoSingles;
+        appendSameRank(fourWithTwoSingles, Rank::Three, 4);
+        appendSameRank(fourWithTwoSingles, Rank::Five, 1);
+        appendSameRank(fourWithTwoSingles, Rank::Six, 1);
+        std::vector<Card> fourWithTwoPairs;
+        appendSameRank(fourWithTwoPairs, Rank::Three, 4);
+        appendSameRank(fourWithTwoPairs, Rank::Five, 2);
+        appendSameRank(fourWithTwoPairs, Rank::Six, 2);
+
+        const std::vector<std::pair<std::vector<Card>, CardPatternType>> cases = {
+            {tripleWithSingle, CardPatternType::TripleWithSingle},
+            {airplaneWithSingles, CardPatternType::AirplaneWithSingles},
+            {fourWithTwoSingles, CardPatternType::FourWithTwoSingles},
+            {fourWithTwoPairs, CardPatternType::FourWithTwoPairs}
+        };
+        const QString soundRoot = QStringLiteral(FPDZ_SOURCE_DIR "/assets/sounds/");
+        for (const auto& [cards, type] : cases) {
+            const auto event = playedEvent(cards, PlayerId::Player1, 3);
+            QCOMPARE(event.pattern.type, type);
+            for (const bool female : {false, true}) {
+                const auto plan = buildCardPatternSoundPlan(event, female);
+                QVERIFY(!plan.voiceFiles.empty());
+                for (const auto& relativePath : plan.voiceFiles) {
+                    const QString absolutePath = soundRoot + QString::fromStdString(relativePath);
+                    QVERIFY2(QFileInfo::exists(absolutePath), qPrintable(absolutePath));
+                }
+            }
+        }
+        const auto event = playedEvent(airplaneWithSingles, PlayerId::Player1, 3);
+        QCOMPARE(asQStringList(buildCardPatternSoundPlan(event)),
+                 QStringList({"card_four/boy/3.wav", "card_four/boy/zhi.wav",
+                              "card_four/boy/4.wav", "card_four/boy/plane.wav",
+                              "card_four/boy/5.wav", "card_four/boy/6.wav"}));
     }
 
     void testFirstTwoAiUseMaleAndThirdAiUsesFemale() {
