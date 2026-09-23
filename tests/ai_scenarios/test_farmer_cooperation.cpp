@@ -58,6 +58,13 @@ Rank playedRank(const GameCommand& command) {
     return Card::create(command.cardIds.front()).rank();
 }
 
+int playedCount(const GameCommand& command, Rank rank) {
+    return static_cast<int>(std::count_if(
+        command.cardIds.begin(), command.cardIds.end(), [rank](CardId id) {
+            return Card::create(id).rank() == rank;
+        }));
+}
+
 } // namespace
 
 class TestFarmerCooperation : public QObject {
@@ -115,6 +122,61 @@ private slots:
         const auto command = ai.decidePlay(observation);
         QCOMPARE(command.type, GameCommandType::PlayCards);
         QCOMPARE(playedRank(command), Rank::Five);
+    }
+
+    void landlordUsesLowestSingleAgainstFarmerAtEveryDifficulty() {
+        auto observation = farmerObservation(
+            handOf({{Rank::Four, 1}, {Rank::Nine, 1}, {Rank::Two, 1}}),
+            cards(Rank::Three, 1), PlayerId::Player3);
+        observation.publicState.players[static_cast<int>(PlayerId::Player2)].role =
+            Role::Landlord;
+        observation.publicState.players[static_cast<int>(PlayerId::Player4)].role =
+            Role::Farmer;
+
+        for (const auto difficulty : {AiDifficulty::Beginner,
+                                      AiDifficulty::Intermediate,
+                                      AiDifficulty::Advanced}) {
+            StandardAiPlayer ai(difficulty);
+            const auto command = ai.decidePlay(observation);
+            QCOMPARE(command.type, GameCommandType::PlayCards);
+            QCOMPARE(playedRank(command), Rank::Four);
+        }
+    }
+
+    void farmerUsesLowestAttachmentAfterLowestBeatingTriple() {
+        auto previous = cards(Rank::Three, 3);
+        const auto previousPair = cards(Rank::Five, 2);
+        previous.insert(previous.end(), previousPair.begin(), previousPair.end());
+        const auto observation = farmerObservation(
+            handOf({{Rank::Four, 3}, {Rank::Six, 2}, {Rank::King, 2}}),
+            previous, PlayerId::Player4);
+
+        for (const auto difficulty : {AiDifficulty::Beginner,
+                                      AiDifficulty::Intermediate,
+                                      AiDifficulty::Advanced}) {
+            StandardAiPlayer ai(difficulty);
+            const auto command = ai.decidePlay(observation);
+            QCOMPARE(command.type, GameCommandType::PlayCards);
+            QCOMPARE(static_cast<int>(command.cardIds.size()), 5);
+            QCOMPARE(playedCount(command, Rank::Four), 3);
+            QCOMPARE(playedCount(command, Rank::Six), 2);
+            QCOMPARE(playedCount(command, Rank::King), 0);
+        }
+    }
+
+    void landlordStillFinishesImmediatelyInsteadOfSavingBomb() {
+        auto observation = farmerObservation(
+            handOf({{Rank::Four, 4}}), cards(Rank::Three, 1), PlayerId::Player3);
+        observation.publicState.players[static_cast<int>(PlayerId::Player2)].role =
+            Role::Landlord;
+        observation.publicState.players[static_cast<int>(PlayerId::Player4)].role =
+            Role::Farmer;
+
+        StandardAiPlayer ai(AiDifficulty::Advanced);
+        const auto command = ai.decidePlay(observation);
+        QCOMPARE(command.type, GameCommandType::PlayCards);
+        QCOMPARE(static_cast<int>(command.cardIds.size()), 4);
+        QCOMPARE(playedCount(command, Rank::Four), 4);
     }
 
     void leadsLowSingleForOneCardTeammate() {

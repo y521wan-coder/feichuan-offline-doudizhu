@@ -653,15 +653,16 @@ private slots:
         QCOMPARE(statusLabel->accessibleName(), QString::fromUtf8(u8"对4"));
 
         QTest::keyClick(&window, Qt::Key_Home);
+        const QString speechBeforeRemovedShortcut = statusLabel->accessibleName();
         QTest::keyClick(&window, Qt::Key_Right, Qt::ShiftModifier);
-        QCOMPARE(handView->currentIndex().row(), 3);
-        QCOMPARE(statusLabel->accessibleName(), QString::fromUtf8(u8"3张4"));
+        QCOMPARE(handView->currentIndex().row(), 0);
+        QCOMPARE(statusLabel->accessibleName(), speechBeforeRemovedShortcut);
         QTest::keyClick(&window, Qt::Key_Left, Qt::ShiftModifier);
         QCOMPARE(handView->currentIndex().row(), 0);
-        QCOMPARE(statusLabel->accessibleName(), QString::fromUtf8(u8"3张3"));
-        QTest::keyClick(&window, Qt::Key_Right, Qt::ShiftModifier);
+        QCOMPARE(statusLabel->accessibleName(), speechBeforeRemovedShortcut);
+        QTest::keyClick(&window, Qt::Key_Right);
         QCOMPARE(handView->currentIndex().row(), 3);
-        QTest::keyClick(&window, Qt::Key_Right, Qt::ShiftModifier);
+        QTest::keyClick(&window, Qt::Key_Right);
         QCOMPARE(handView->currentIndex().row(), 6);
         QCOMPARE(statusLabel->accessibleName(), QString::fromUtf8(u8"4张7"));
 
@@ -1603,6 +1604,9 @@ private slots:
         QVERIFY(PostMessageW(windowHandle, keyboardHookMessage, VK_HOME, 0));
         QTRY_COMPARE(handView->currentIndex().row(), 0);
         QVERIFY(PostMessageW(windowHandle, keyboardHookMessage, VK_RIGHT, shiftFlag));
+        QTest::qWait(50);
+        QCOMPARE(handView->currentIndex().row(), 0);
+        QVERIFY(PostMessageW(windowHandle, keyboardHookMessage, VK_RIGHT, 0));
         QTRY_COMPARE(handView->currentIndex().row(), 2);
         auto* statusLabel = window.statusBar()->findChild<QLabel*>();
         QVERIFY(statusLabel);
@@ -2083,10 +2087,10 @@ private slots:
         const int nextRankGroupRow = handModel->nextBrowsableGroupStartRow(0);
         QVERIFY(nextRankGroupRow > 0);
         QTest::keyClick(&window, Qt::Key_Right, Qt::ShiftModifier);
-        QCOMPARE(handView->currentIndex().row(), nextRankGroupRow);
+        QCOMPARE(handView->currentIndex().row(), 0);
         QVERIFY(handView->selectionModel()->selectedIndexes().isEmpty());
-        QVERIFY(!statusLabel->text().isEmpty());
-        QVERIFY(!containsForbiddenSpeech(statusLabel->text()));
+        QTest::keyClick(&window, Qt::Key_Right);
+        QCOMPARE(handView->currentIndex().row(), nextRankGroupRow);
         QTest::keyClick(&window, Qt::Key_Home);
 
         const int handSizeBeforePlay = fs.players[0].hand.size();
@@ -3135,8 +3139,8 @@ private slots:
 
         QTest::keyClick(&window, Qt::Key_End);
         QCOMPARE(handView->currentIndex().row(), 6);
-        QTest::keyClick(&window, Qt::Key_Left, Qt::ShiftModifier);
-        QTest::keyClick(&window, Qt::Key_Left, Qt::ShiftModifier);
+        QTest::keyClick(&window, Qt::Key_Left);
+        QTest::keyClick(&window, Qt::Key_Left);
         QCOMPARE(handView->currentIndex().row(), 4);
         QCOMPARE(handModel->cardAt(handView->currentIndex().row()).rank(), Rank::Seven);
         QTest::keyClick(&window, Qt::Key_Up);
@@ -3153,7 +3157,7 @@ private slots:
         QTest::keyClick(&window, Qt::Key_Right);
         QCOMPARE(handView->currentIndex().row(), 5);
         QVERIFY(!handModel->isSelected(handView->currentIndex().row()));
-        QTest::keyClick(&window, Qt::Key_Right, Qt::ShiftModifier);
+        QTest::keyClick(&window, Qt::Key_Right);
         QCOMPARE(handView->currentIndex().row(), 6);
         QVERIFY(!handModel->isSelected(handView->currentIndex().row()));
 

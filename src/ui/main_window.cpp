@@ -431,9 +431,7 @@ bool isSingleFireKey(DWORD virtualKey, bool ctrlDown = false,
         shortcutFromVirtualKey(virtualKey, ctrlDown, shiftDown, altDown));
     if (!action) return false;
     return *action != ShortcutAction::PreviousRankGroup &&
-           *action != ShortcutAction::NextRankGroup &&
-           *action != ShortcutAction::PreviousCard &&
-           *action != ShortcutAction::NextCard;
+           *action != ShortcutAction::NextRankGroup;
 }
 
 LRESULT CALLBACK lowLevelKeyboardProc(int code, WPARAM wParam, LPARAM lParam) {
@@ -1773,6 +1771,14 @@ bool MainWindow::handleNativeShortcut(
     const bool noModifier = !ctrlDown && !shiftDown && !altDown;
     const auto phase = m_engine.state().phase();
 
+    // Shift+Left/Right used to duplicate rank-group browsing. Keep the
+    // combination reserved as an explicit no-op so legacy settings and every
+    // Windows input path cannot bring the removed behavior back.
+    if ((virtualKey == VK_LEFT || virtualKey == VK_RIGHT) &&
+        shiftDown && !ctrlDown && !altDown) {
+        return true;
+    }
+
     if (virtualKey == VK_F4 && altDown && !ctrlDown && !shiftDown) {
         requestApplicationExit();
         return true;
@@ -1849,18 +1855,10 @@ bool MainWindow::handleNativeShortcut(
 
     if (m_handView && m_handModel && m_handModel->rowCount() > 0 && !altDown) {
         const bool handBrowsing =
-            ((virtualKey == VK_LEFT || virtualKey == VK_RIGHT) &&
-             ((shiftDown && !ctrlDown) || noModifier)) ||
+            ((virtualKey == VK_LEFT || virtualKey == VK_RIGHT) && noModifier) ||
             ((virtualKey == VK_HOME || virtualKey == VK_END) && noModifier);
         if (handBrowsing) resumeHandAccessibilityForUserAction();
         int row = m_handView->currentIndex().isValid() ? m_handView->currentIndex().row() : 0;
-        if ((virtualKey == VK_LEFT || virtualKey == VK_RIGHT) && shiftDown && !ctrlDown) {
-            const int target = virtualKey == VK_LEFT
-                ? m_handModel->previousBrowsableGroupStartRow(row)
-                : m_handModel->nextBrowsableGroupStartRow(row);
-            if (target >= 0) moveHandCursorTo(target);
-            return true;
-        }
         if ((virtualKey == VK_LEFT || virtualKey == VK_RIGHT) && noModifier) {
             const int target = virtualKey == VK_LEFT
                 ? m_handModel->previousBrowsableGroupStartRow(row)
@@ -2067,8 +2065,6 @@ bool MainWindow::triggerShortcutAction(ShortcutAction action, const QString& sou
         return true;
     case ShortcutAction::PreviousRankGroup:
     case ShortcutAction::NextRankGroup:
-    case ShortcutAction::PreviousCard:
-    case ShortcutAction::NextCard:
     case ShortcutAction::FirstRankGroup:
     case ShortcutAction::LastRankGroup: {
         if (!m_handView || !m_handModel || m_handModel->rowCount() <= 0) return false;
@@ -2079,10 +2075,6 @@ bool MainWindow::triggerShortcutAction(ShortcutAction action, const QString& sou
         if (action == ShortcutAction::PreviousRankGroup) {
             target = m_handModel->previousBrowsableGroupStartRow(row);
         } else if (action == ShortcutAction::NextRankGroup) {
-            target = m_handModel->nextBrowsableGroupStartRow(row);
-        } else if (action == ShortcutAction::PreviousCard) {
-            target = m_handModel->previousBrowsableGroupStartRow(row);
-        } else if (action == ShortcutAction::NextCard) {
             target = m_handModel->nextBrowsableGroupStartRow(row);
         } else if (action == ShortcutAction::FirstRankGroup) {
             target = m_handModel->firstUnselectedRow();
@@ -2168,13 +2160,15 @@ bool MainWindow::handleKeyPress(QKeyEvent* event) {
     auto phase = m_engine.state().phase();
     const auto modifiers = event->modifiers();
     const auto navigationModifiers = modifiers & ~Qt::KeypadModifier;
+    if ((event->key() == Qt::Key_Left || event->key() == Qt::Key_Right) &&
+        navigationModifiers == Qt::ShiftModifier) {
+        return true;
+    }
     const auto configuredAction = m_settings.shortcuts.actionFor(
         ShortcutSettings::fromKeyEvent(event->key(), modifiers));
     if (configuredAction) {
         const bool repeatable = *configuredAction == ShortcutAction::PreviousRankGroup ||
-            *configuredAction == ShortcutAction::NextRankGroup ||
-            *configuredAction == ShortcutAction::PreviousCard ||
-            *configuredAction == ShortcutAction::NextCard;
+            *configuredAction == ShortcutAction::NextRankGroup;
         if (event->isAutoRepeat() && !repeatable) return true;
         return triggerShortcutAction(*configuredAction, QStringLiteral("qt_event"));
     }
@@ -2293,18 +2287,10 @@ bool MainWindow::handleKeyPress(QKeyEvent* event) {
     if (m_handView && m_handModel && m_handModel->rowCount() > 0) {
         const bool handBrowsing =
             ((event->key() == Qt::Key_Left || event->key() == Qt::Key_Right) &&
-             ((handShiftDown && !handControlDown && !handAltDown) || handNoModifier)) ||
+             handNoModifier) ||
             ((event->key() == Qt::Key_Home || event->key() == Qt::Key_End) && handNoModifier);
         if (handBrowsing) resumeHandAccessibilityForUserAction();
         int row = m_handView->currentIndex().isValid() ? m_handView->currentIndex().row() : 0;
-        if ((event->key() == Qt::Key_Left || event->key() == Qt::Key_Right)
-            && handShiftDown && !handControlDown && !handAltDown) {
-            const int target = event->key() == Qt::Key_Left
-                ? m_handModel->previousBrowsableGroupStartRow(row)
-                : m_handModel->nextBrowsableGroupStartRow(row);
-            if (target >= 0) moveHandCursorTo(target);
-            return true;
-        }
         if ((event->key() == Qt::Key_Left || event->key() == Qt::Key_Right)
             && handNoModifier) {
             const int target = event->key() == Qt::Key_Left

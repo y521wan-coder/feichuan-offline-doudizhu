@@ -171,8 +171,6 @@ ShortcutBinding ShortcutSettings::defaultBinding(ShortcutAction action) {
     case ReturnToMainScreen: return {Qt::Key_Escape, Qt::NoModifier};
     case PreviousRankGroup: return {Qt::Key_Left, Qt::NoModifier};
     case NextRankGroup: return {Qt::Key_Right, Qt::NoModifier};
-    case PreviousCard: return {Qt::Key_Left, Qt::ShiftModifier};
-    case NextCard: return {Qt::Key_Right, Qt::ShiftModifier};
     case FirstRankGroup: return {Qt::Key_Home, Qt::NoModifier};
     case LastRankGroup: return {Qt::Key_End, Qt::NoModifier};
     case PickCard: return {Qt::Key_Up, Qt::NoModifier};
@@ -206,8 +204,6 @@ QString ShortcutSettings::actionId(ShortcutAction action) {
     case ReturnToMainScreen: return QStringLiteral("returnToMainScreen");
     case PreviousRankGroup: return QStringLiteral("previousRankGroup");
     case NextRankGroup: return QStringLiteral("nextRankGroup");
-    case PreviousCard: return QStringLiteral("previousCard");
-    case NextCard: return QStringLiteral("nextCard");
     case FirstRankGroup: return QStringLiteral("firstRankGroup");
     case LastRankGroup: return QStringLiteral("lastRankGroup");
     case PickCard: return QStringLiteral("pickCard");
@@ -241,8 +237,6 @@ QString ShortcutSettings::actionName(ShortcutAction action) {
     case ReturnToMainScreen: return QString::fromUtf8(u8"返回主界面");
     case PreviousRankGroup: return QString::fromUtf8(u8"浏览上一个点数组");
     case NextRankGroup: return QString::fromUtf8(u8"浏览下一个点数组");
-    case PreviousCard: return QString::fromUtf8(u8"Shift浏览上一个点数组");
-    case NextCard: return QString::fromUtf8(u8"Shift浏览下一个点数组");
     case FirstRankGroup: return QString::fromUtf8(u8"跳到第一个点数组");
     case LastRankGroup: return QString::fromUtf8(u8"跳到最后一个点数组");
     case PickCard: return QString::fromUtf8(u8"拿起当前一张牌");
@@ -282,6 +276,10 @@ QString ShortcutSettings::keyName(const ShortcutBinding& input) {
 
 bool ShortcutSettings::isValidBinding(const ShortcutBinding& input) {
     const ShortcutBinding binding = fromKeyEvent(input.key, input.modifiers);
+    if ((binding.key == Qt::Key_Left || binding.key == Qt::Key_Right) &&
+        binding.modifiers == Qt::ShiftModifier) {
+        return false;
+    }
     if (binding.key == 0 || binding.key == Qt::Key_unknown ||
         binding.key == Qt::Key_Control || binding.key == Qt::Key_Shift ||
         binding.key == Qt::Key_Alt || binding.key == Qt::Key_Meta ||

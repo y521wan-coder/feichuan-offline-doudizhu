@@ -9,6 +9,7 @@
 #include "../core/rules/pattern_analyzer.h"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <limits>
@@ -58,6 +59,78 @@ int publicRankPlayedCount(const PublicGameSnapshot& state, Rank rank) {
         }
     }
     return count;
+}
+
+int mainBodyCopies(CardPatternType type) {
+    switch (type) {
+    case CardPatternType::Single:
+    case CardPatternType::Straight:
+        return 1;
+    case CardPatternType::Pair:
+    case CardPatternType::ConsecutivePairs:
+        return 2;
+    case CardPatternType::Triple:
+    case CardPatternType::TripleWithSingle:
+    case CardPatternType::TripleWithPair:
+    case CardPatternType::Airplane:
+    case CardPatternType::AirplaneWithSingles:
+    case CardPatternType::AirplaneWithPairs:
+        return 3;
+    case CardPatternType::FourWithTwoSingles:
+    case CardPatternType::FourWithTwoPairs:
+        return 4;
+    default:
+        return 0;
+    }
+}
+
+std::vector<int> attachmentRanks(const LegalMove& move) {
+    std::array<int, RANK_COUNT> counts{};
+    for (const auto& card : move.cards) ++counts[rankWeight(card.rank())];
+
+    const int copies = mainBodyCopies(move.pattern.type);
+    const int first = rankWeight(move.pattern.mainRank);
+    for (int offset = 0; offset < move.pattern.mainLength && copies > 0; ++offset) {
+        counts[first + offset] -= copies;
+    }
+
+    std::vector<int> result;
+    for (int rank = 0; rank < RANK_COUNT; ++rank) {
+        for (int count = 0; count < counts[rank]; ++count) result.push_back(rank);
+    }
+    return result;
+}
+
+bool cheaperOpponentResponse(const LegalMove& left, const LegalMove& right) {
+    if (left.pattern.isBomb() != right.pattern.isBomb()) return !left.pattern.isBomb();
+    if (left.pattern.isBomb()) {
+        const int leftLevel = bombLevel(left.pattern.type);
+        const int rightLevel = bombLevel(right.pattern.type);
+        if (leftLevel != rightLevel) return leftLevel < rightLevel;
+    }
+    const int leftMainRank = rankWeight(left.pattern.mainRank);
+    const int rightMainRank = rankWeight(right.pattern.mainRank);
+    if (leftMainRank != rightMainRank) return leftMainRank < rightMainRank;
+    const auto leftAttachments = attachmentRanks(left);
+    const auto rightAttachments = attachmentRanks(right);
+    return std::lexicographical_compare(
+        leftAttachments.begin(), leftAttachments.end(),
+        rightAttachments.begin(), rightAttachments.end());
+}
+
+void keepMinimumOpponentResponses(const std::vector<LegalMove>& moves,
+                                  std::vector<std::size_t>& candidateIndexes) {
+    if (candidateIndexes.size() < 2) return;
+    const auto best = *std::min_element(
+        candidateIndexes.begin(), candidateIndexes.end(),
+        [&](std::size_t left, std::size_t right) {
+            return cheaperOpponentResponse(moves[left], moves[right]);
+        });
+    const auto& bestMove = moves[best];
+    std::erase_if(candidateIndexes, [&](std::size_t index) {
+        return cheaperOpponentResponse(bestMove, moves[index]) ||
+               cheaperOpponentResponse(moves[index], bestMove);
+    });
 }
 
 } // namespace
@@ -125,6 +198,21 @@ GameCommand StandardAiPlayer::decidePlay(const AiObservation& observation) {
         command.type = GameCommandType::Pass;
         command.aiDecisionReason = "team_filter_no_safe_response";
         return command;
+    }
+
+    if (!isLeader && lastRole != Role::Undetermined && ownRole != lastRole) {
+        const bool canFinishImmediately = std::any_of(
+            candidateIndexes.begin(), candidateIndexes.end(), [&](std::size_t index) {
+                return static_cast<int>(moves[index].cards.size()) ==
+                       observation.ownHand.size();
+            });
+        if (canFinishImmediately) {
+            std::erase_if(candidateIndexes, [&](std::size_t index) {
+                return static_cast<int>(moves[index].cards.size()) !=
+                       observation.ownHand.size();
+            });
+        }
+        keepMinimumOpponentResponses(moves, candidateIndexes);
     }
 
     struct ScoredMove {

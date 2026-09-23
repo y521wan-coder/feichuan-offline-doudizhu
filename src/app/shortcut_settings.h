@@ -22,8 +22,6 @@ enum class ShortcutAction {
     ReturnToMainScreen,
     PreviousRankGroup,
     NextRankGroup,
-    PreviousCard,
-    NextCard,
     FirstRankGroup,
     LastRankGroup,
     PickCard,

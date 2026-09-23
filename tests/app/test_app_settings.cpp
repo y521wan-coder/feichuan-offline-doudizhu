@@ -31,6 +31,10 @@ private slots:
         QCOMPARE(ShortcutSettings::keyName(
                      {Qt::Key_Left, Qt::ShiftModifier}),
                  QString::fromUtf8(u8"Shift加左光标键"));
+        QVERIFY(!ShortcutSettings::isValidBinding(
+            {Qt::Key_Left, Qt::ShiftModifier}));
+        QVERIFY(!ShortcutSettings::isValidBinding(
+            {Qt::Key_Right, Qt::ShiftModifier}));
         QCOMPARE(ShortcutSettings::keyName(
                      {Qt::Key_F, Qt::AltModifier}),
                  QStringLiteral("Alt加字母F键"));
