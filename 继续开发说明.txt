@@ -1,99 +1,74 @@
 飞船斗地主——继续开发说明
-更新时间：2026-09-23
+更新时间：2026-09-24
 项目：C:\Feichuan-Doudizhu
 仓库：https://github.com/y521wan-coder/feichuan-offline-doudizhu
 
-一、接手
+最新一轮：2026-09-24 正式发布 2.1
 
-1. 先读 `AGENTS.md`、本文及 `docs\架构说明.md`、`docs\测试与验收.md`、`docs\更新协议.md`。
-2. 执行 `git -c core.quotepath=false status --short`、`git log -12 --oneline`、`git diff --stat`；不得用 reset、checkout、clean 丢弃用户修改。
-3. 普通开发不联网、不签名、不发布；只有用户明确要求才执行发布。
-4. 项目固定位于 `C:\Feichuan-Doudizhu`（纯英文路径）。CMake、MSVC、Inno Setup 与脚本直接使用真实路径，不再需要 SUBST 映射盘。除用户明确要求外不要移动或重命名该目录，否则构建缓存、快捷方式和本文档路径会全部失效。
+- 用户试玩本机试用内核后确认“这次很完美”，指定正式版本为 2.1，并要求发布更新服务器、更新开源仓库，最后更新本文；用户表示短期内不再调整。
+- 2.1 只包含两项产品改动：取消 Shift+左/右浏览牌；机器人决定压制对手时，在合法动作和既有团队规则过滤后，除立即出完获胜外，优先使用刚好能压住的最低牌，顺序为非炸弹、最低主体点数、最低带牌点数。普通左/右、领出、队友让牌、地主一张拦截、规则、读屏、音效、资源、持久化、更新器和全知边界不变。
+- 正式全量打包 `tools\build_release.ps1 -Package` 成功：109 个编译步骤，CTest 19/19、0 失败、143.60 秒；Inno Setup 6.7.3 编译成功。主程序不依赖 Qt6Network。
+- 正式安装包 `releases\飞船斗地主-Setup-2.1.exe`：61,996,767 字节，SHA-256 `72D21F9BE12F0991F79F2C3E27B5FE4EDE0C273EAB3F7AA3005CBEF948B2CD2A`，VersionInfo 2.1，Authenticode `NotSigned`。固定公钥清单为 `releases\飞船斗地主-Setup-2.1.release-manifest.json`，密钥 ID `898098f7c562190b1bae909422cf7b5ef09a34bc3e400110fa18cc65a77ff81a`。
+- 正式主程序：856,576 字节，文件版本 2.1.0.0，SHA-256 `7D0DE3129261B89D885C1AA63702375EABA295BDFE3D95963F623F9DB3EC3524`。正式更新器：72,192 字节，文件版本 2.1.0.0，SHA-256 `1532EE17B58C1C0DB75C755F368A813A753874C925600FB190F815D09FDE4B7F`。installer-stage 与构建目录逐字节一致。
+- 更新服务器当前唯一 stable 为 `windows/stable/2.1`、Release ID 75、`status=published`。0.9 可发现 2.1，2.1 显示无更新；API 大小、SHA-256、固定公钥签名和服务器回下载安装包均核验一致，`SERVER_VERIFICATION=OK`。
+- GitHub `main` 已推送正式发布提交 `eafc5f07e9e373a78581ec8b061651f36f74b3e5`；注解标签 `v2.1` 已推送并解引用到同一提交。本文在发布成功后最后更新，另行形成文档提交，因此标签保持指向正式产品提交。
+- 本机没有运行正式 2.1 安装包，也没有启动游戏或更新器。当前安装目录仍保留用户试玩通过的同功能试用内核：主程序 856,576 字节、文件版本 2.0.0.0、SHA-256 `59628C68AE8C7F804D3ADB35FE4F786E7FCA96A620BF9316BE04B130D3277C10`；更新器仍为正式 2.0 文件。不要误写成本机已经安装正式 2.1。
 
-二、正式状态
+一、接手顺序
 
-- 产品名称为“飞船斗地主”；产品标识仍为 `feichuan_offline_doudizhu`，安装器 AppId、应用数据目录、更新协议产品键和固定发布公钥均保持不变，因此 1.8 老用户可以无缝升级。
-- 正式版 2.0（Windows 文件版本 2.0.0.0）；更新服务器 `windows/stable/2.0`，Release ID 72，`status=published`。版本按用户约定 2.0、2.1、……、2.9、3.0 递增，下次为 2.1。
-- 安装包：`releases\飞船斗地主-Setup-2.0.exe`，61,995,229 字节，SHA-256 `2A4A4A65BA7E5E9290D9489C9AAC9040699DCA44BC5DFA80C5454B09F54BB83B`，VersionInfo 2.0.0，Authenticode `NotSigned`。
-- 固定公钥清单：`releases\飞船斗地主-Setup-2.0.release-manifest.json`；密钥 ID `898098f7c562190b1bae909422cf7b5ef09a34bc3e400110fa18cc65a77ff81a`。服务器回下载大小、SHA-256 与固定公钥签名已独立复验一致（`SERVER_VERIFICATION=OK`，Release ID 72）；1.9 可发现 2.0，2.0 无更新。
-- 打包构建主程序：`build\release-x64\飞船斗地主.exe`，855,040 字节，SHA-256 `38CB6771F787FFAA57CB57D0BF7A0730ABDBE18739D58D6E3F0016440ADBECBD`；更新器 `build\release-x64\飞船斗地主更新器.exe`，72,192 字节，SHA-256 `9A9DCFE8A6AB1A4362A1CE960C43A05B9EBBE8DF6C2C5814266A7E331D73EEE8`，文件版本均为 2.0.0.0。主程序静态依赖不含 Qt6Network，只有更新器联网。注意 MSVC 链接会写入时间戳，同一份源码两次构建大小相同而哈希不同，PE 哈希只能用于比对同一次构建。
-- 服务器端在 1.9 已同步改名：`/opt/update-server/server/updates/management/commands/publish_signed_release.py` 的固定产品名由“飞船单机斗地主”改为“飞船斗地主”，数据库 `Product(product_key=feichuan_offline_doudizhu)` 的 name 同步改名；固定公钥、`release_signature_required` 和签名策略未变。改名前服务器源码与数据库备份位于 `/opt/update-server/backups/pre-rename-20260923-012545/`；2.0 发布后 stable 最新记录为 Release ID 72。
-- 本机安装目录仍为 `C:\Program Files\飞船单机斗地主`（1.7 安装内容加 2026-09-23 音效修复试用主程序），未安装或启动正式 2.0。用户已亲自测试该试用内核，确认音效问题解决。当前试用内核为文件版本 1.7.0.0、SHA-256 `150CDBF9D9E4DC9FAA5431C481F90EB23005CD0642D1C26C3515E3E67F17DBC5`。本轮替换前试用内核备份在 `artifacts\kernel-replacement-20260923\backup\installed-game-before-audio-fix.exe`；旧正式内核备份仍在同目录 `installed-game-before.exe`。
-- 尚未执行、不得写成通过：2.0 覆盖安装、全新安装、启动、快捷方式、卸载与用户数据保留验收，NVDA/讲述人/争渡/保益四种读屏软件完整人工验收，物理键盘钩子人工实测，以及公开 CA Authenticode 签名。2.0 未修改 AI，1.7 的全知 AI 验证结论继续沿用，不新增强度声明。
+1. 先读 `AGENTS.md`、本文、`docs\架构说明.md`、`docs\测试与验收.md`、`docs\更新协议.md`。
+2. 执行 `git -c core.quotepath=false status --short`、`git log -12 --oneline`、`git diff --stat`。
+3. 不得用 reset、checkout、clean 丢弃用户修改。普通开发不联网、不签名、不发布；只有用户明确要求才做远端操作。
+4. 项目固定在 `C:\Feichuan-Doudizhu`，不要移动或重命名。Qt 为 `Qt\6.8.3\msvc2022_64`，使用 CMake、Ninja、MSVC x64。
 
-三、产品与 1.7 AI
+二、当前唯一正式基线：新 2.1
 
-- Windows x64、Qt Widgets、完全本地单机；二人/三人一副牌，四人两副牌。只有初级、中级、高级三档 AI。
-- 1.7 为全知 AI：`AiObservation` 新增 `AiFullInformation`（真实整桌手牌、真实底牌、二人模式在局外的 17 张盖牌），`makeAiObservation` 逐张校验牌 ID 合法、不重复、不超过当前人数牌堆容量，二人模式另校验盖牌恰好 17 张，失败即 `available=false`，全知推演整体退出。
-- 新增 `src/ai/full_information_search.h/.cpp`，作为默认整桌推演器：在复制牌桌上做带硬截止时间和节点预算的同队极大/敌队极小搜索加有限轮次推演，总剩余牌不超过 `activePlayerCount * 6 + 2` 时切换为更深的残局搜索，候选按难度裁剪，推演内部继续套用农民强制协作规则。`StandardAiPlayer(AiDifficulty, AiInformationMode)` 默认 `FullInformation`；`ImperfectInformationSearch` 保留为 `PublicInference` 显式测试模式。
-- 叫分新增全知分支：有全知信息时用“本家手牌加真实底牌”的牌力减去最强真实对手牌力，替代旧的假设底牌抽样。队友只剩一张且已知确切点数时，用真实可被压过的上限喂牌，原因码 `feed_safe_single_to_one_card_teammate`；未知点数时仍用原来的低单牌规则。
-- 难度参数（预算毫秒/搜索深度/候选裁剪/全知根候选/节点预算/推演轮数/安全随机度）：初级 150/1/8/2/120/4/0.35，中级 450/2/24/3/500/8/0.10，高级 1000/4/64/4/7000/20/0。团队强制规则三级完全一致。
-- 真人可见范围不变：可视牌桌、朗读和公告仍只依据公共快照、真人手牌和选中牌；全知内容不写入公共快照、可视牌桌、朗读文本、回放、统计、界面文字或诊断日志。
-- 正式稳定性模拟：二人/三人/四人 × 初级/中级/高级各 10000 局，共 120,000 局全部正常结束，`illegal`、`unfinished`、`duplicate_deals`、`set_aside_played`、`teammate_bombs` 全为 0；最慢单次决策 215.171 毫秒（四人高级）。原始输出在 `artifacts\ai-validation-1.7\`（该目录已加入 .gitignore，不作为提交内容）。
-- 强度结论：本轮只验证合法性、可结束性与协作硬规则，未重跑同种子强度对照，不得声称 1.7 比 1.6 更强。
+- 当前 2.1 是用户确认后的“最低压制与快捷键精简”版本，不是此前已经撤回的“保留对二等控制牌”旧 2.1。旧 2.1 的 Release ID 73、标签和代码早已删除，不得恢复其控制牌 AI 改动。
+- 正式代码提交为 `eafc5f07e9e373a78581ec8b061651f36f74b3e5`，注解标签 `v2.1` 指向该提交；`v2.0` 仍指向 `05a3903`。发布前基线为 2.0 发布文档提交 `2375ca0`。
+- 版本号来自 `version.txt` 的 2.1；内置更新日志已记录两项改动。详细实现和验收证据见 `docs\开发日志.md`、`docs\快捷键规格.md`、`docs\测试与验收.md`。
+- 下一次正式版本号须先与用户确认；若继续既定序列则为 2.2。不得重复发布服务器已经存在的 2.1。
 
-四、不可变边界
+三、本机安装状态
 
-- 不得恢复 Master/大师、模型文件、训练、检查点、模型晋级或训练中心通信；当前版本仍不得新增账号、匹配、真人联机或云牌局。以后要做真人联机时必须先另立方案、更新本文与 `AGENTS.md`，并保持现有单机功能不受影响。
-- 不得改动 `feichuan_offline_doudizhu` 产品标识、安装器 AppId、应用数据目录和固定发布公钥；改名只允许改对用户可见的名称。
-- AI 仍只能经 `AiObservation` 取值，不得持有 `GameState`、`FullGameState`、洗牌种子或未来牌序；全知内容不得进入公共快照、可视牌桌、朗读、回放、统计、界面文字或诊断日志。
+- 安装位置为 `C:\Program Files\飞船斗地主`，此前正式 2.0 全新安装后共 196 个文件，注册表版本为 2.0，公共桌面快捷方式指向 `C:\Program Files\飞船斗地主\飞船斗地主.exe`。
+- 本次开发阶段只替换了上述主程序，安装目录文件数保持 196，逐文件 SHA-256 比较唯一变化是主程序。用户已经实际试玩并确认功能效果完美。
+- 正式发布阶段没有再次改动本机安装：没有安装或运行正式 2.1 安装包，没有启动游戏或更新器，没有修改用户数据。用户数据目录当前是否存在需按实机重新检查。
+- 尚未执行、不得写成通过：正式 2.1 安装包覆盖/全新安装、启动、快捷方式、卸载和用户数据保留循环；NVDA/讲述人/争渡/保益四读屏完整人工验收；物理键盘钩子完整人工实测；公开 CA Authenticode 签名。
+
+四、2.1 产品内容与 AI 边界
+
+- Windows x64、Qt Widgets、完全本地单机；二人/三人使用一副牌，四人使用两副牌；只有初级、中级、高级三档 AI。
+- Shift+左/右两个旧动作已从枚举、默认绑定、设置列表和处理路径删除。Qt 键盘事件、Windows native message 与低级钩子消息将单独 Shift+左/右显式作为无操作；旧 JSON 中 `previousCard`、`nextCard` 字段忽略，且不能重新绑定单独 Shift+左/右。普通左/右及其它快捷键不变。
+- AI 只在回应对手且决定出牌时执行最低压制硬过滤：立即出完获胜优先；否则非炸弹优先、最低主体点数、最低带牌点数。回应队友、战略让牌、地主一张拦截、领出评分和所有牌型规则保持原逻辑。
+- AI 仍只能经 `AiObservation` 读取 `AiFullInformation`，不得持有 `GameState`、`FullGameState`、洗牌种子或未来牌序。真实暗牌不得进入公共快照、界面、朗读、回放、统计或日志。
+- 1.7 稳定性基线仍为二人/三人/四人 × 三级 AI 各 10000 局，共 120000 局正常结束，非法动作、未结束、重复发牌、盖牌被打出和农民炸队友均为 0。该结果只证明合法性与稳定性，不证明胜率或强度提升。
+
+五、测试与验收边界
+
+- 最低压制确定性测试覆盖：三级地主均以 4 压单 3；三级农民均以三张 4 带对 6 压三张 3 带对 5，而不浪费对 K；能用四张 4 直接出完时仍立即获胜。测试只经 `AiObservation` 构造。
+- 快捷键测试覆盖 Qt 事件与 Windows 钩子消息的 Shift+左/右无操作，以及普通左/右仍正常浏览；快捷键目标 110/110 通过。
+- 正式 CTest 19/19 包括二人/三人/四人模拟、高级 AI 500 局、农民协作、最低压制、快捷键、声音、规则、持久化与更新签名等目标。
+- 用户已经完成本次两项核心改动的实际试玩确认；未执行项目见第三节，不得扩大描述为全量人工验收通过。
+
+六、不可变边界
+
+- 产品名称为“飞船斗地主”；不得改动产品标识 `feichuan_offline_doudizhu`、安装器 AppId `{6D733A47-91F6-4B19-A70D-48F9D8231C81}`、应用数据标识或固定发布公钥。
+- 不得恢复 Master/大师、模型文件、训练、检查点、模型晋级、训练中心通信、账号、匹配、真人联机或云牌局。
 - 主程序、core、ai、ui 不得链接 Qt Network；联网只属于独立更新器。
-- 未完成无障碍回归前不得重做 Qt Widgets、焦点、UIA、朗读或键盘架构。现有 NVDA、保益、争渡私有接口优先，讲述人使用标准 UIA Announcement，最后才是 Qt/UIA 焦点兜底。
-- 叫分期底牌对真人隐藏，地主确定后才公开。可视牌桌只能接收公共快照、真人手牌和选中牌 ID。
-- 大键盘 1/2/3/4 查询玩家；真人叫分时 0/1/2/3 优先；Alt+数字不是游戏键。快捷键规格见 `docs\快捷键规格.md`。
-- 新增第三方内容须登记来源、许可证、用途和文件范围。私钥、密码、Token、DPAPI 数据、服务器配置和 SSH 密钥不得进入仓库、文档、日志或聊天。
+- 叫分期底牌对真人隐藏，地主确定后才公开；可视牌桌只能接收公共快照、真人手牌和选中牌 ID。
+- 大键盘 1/2/3/4 查询玩家；真人叫分时 0/1/2/3 优先；Alt+数字不是游戏键。详见 `docs\快捷键规格.md`。
+- 私钥、密码、Token、DPAPI 数据、服务器配置和 SSH 密钥不得进入仓库、文档、日志或聊天；新增第三方内容必须登记来源、许可证、用途和文件范围。
 
-五、构建与验证
+七、构建、测试与以后发布
 
-- Qt `Qt\6.8.3\msvc2022_64`，CMake + Ninja + MSVC x64。迁移后项目内 Qt 目录曾为空，已用 aqtinstall 按原命令恢复：`aqt install-qt windows desktop 6.8.3 win64_msvc2022_64 -O Qt --timeout 60`。
 - 增量：`.\tools\build.ps1 -Preset release-x64 -Build -Test`
 - 全量：`.\tools\build.ps1 -Preset release-x64 -Configure -Build -Test`
-- 安装包：`.\tools\build_release.ps1 -Package`
-- 2.0 正式打包全量 CTest 19/19（162.56 秒），Inno Setup 编译成功（23.578 秒）。1.8 修改后的快捷键针对性测试为 110/110。
-- 修改规则或 AI 必须补充只经 `AiObservation` 构造的确定性测试（覆盖全知输入一致性、非法全知输入被拒绝、相同输入产生相同决策）；修改键盘或朗读须检查 Qt、native message、低级钩子、UIA 和复读路径。AI 日志不得记录暗牌。
-- 修改服务器发布命令后必须重建 `deploy-web` 镜像并在容器内跑 `python manage.py test updates`（当前 33/33 通过）。
+- 打包：`.\tools\build_release.ps1 -Package`
+- 修改 AI 必须补充只经 `AiObservation` 构造的确定性测试；修改键盘或朗读必须覆盖 Qt event、Windows native message、低级钩子、UIA 和复读路径；AI 日志不得记录暗牌。
+- 发布顺序：先与用户确认版本；更新版本与文档；全量打包和验收；`python tools\sign_release.py`；`python tools\publish_update.py --ssh-key <仓库外私钥>`；验证旧版发现新版、新版无更新和回下载一致；最后提交、打注解标签并推送。不得重复发布同版本或绕过固定公钥签名。
 
-六、以后发布
+八、恢复与历史
 
-1. 版本高于服务器；修改 `version.txt`、代码、测试和文档。版本编号按用户约定从 2.0 到 2.9，接着为 3.0，再依此类推；不使用 2.10。
-2. `tools\build_release.ps1 -Package`；核验版本、大小、SHA-256、Authenticode，并按用户要求完成安装验收。
-3. `python tools\sign_release.py`。
-4. `python tools\publish_update.py --ssh-key <仓库外私钥>`（当前服务器 root 通道为 `C:\apple1007`）；验证旧版发现新版、新版无更新及回下载一致。
-5. 更新文档，提交、创建 `v<版本>` 标签并推送。不得重复发布同版本、绕过签名或误称固定公钥签名为 Authenticode。
-6. 服务器固定产品名已随 1.9 改为“飞船斗地主”；再次改名必须同时改命令常量、数据库 Product 行并重建镜像，否则发布会以“产品名称不符合固定配置”失败。
-
-详细历史见 `docs\开发日志.md`，验收证据见 `docs\测试与验收.md`，规则见 `docs\规则规格.md`。短期无计划变更。
-
-七、2026-09-23 正式发布 1.9（整体迁移、改名与发布）
-
-- 需求：项目整体从 `D:\飞船单机斗地主` 迁到 C 盘英文路径；软件名称由“飞船单机斗地主”改为“飞船斗地主”；更新服务器与开源仓库同步到 1.9；继续开发说明与相关文档全部改为新路径新名称，保证下次直接接手。
-- 迁移：整目录（含 .git、Qt、构建产物、发布包、历史验收证据）迁到 `C:\Feichuan-Doudizhu`，D 盘源目录已不存在；目标仓库工作区与提交历史完整。
-- 改名采用“外部名称更新、内部身份保持”：界面、EXE、更新器、安装包、快捷方式、文档统一为“飞船斗地主”；`feichuan_offline_doudizhu`、安装器 AppId `{6D733A47-91F6-4B19-A70D-48F9D8231C81}`、应用数据标识与固定公钥不变；安装脚本会清理旧名称快捷方式与旧文件。
-- 修改文件：`CMakeLists.txt`、`cmake/InstallRules.cmake`、`cmake/windows_version.rc.in`、`src/app/application.cpp`、`src/ui/main_window.cpp`、`src/ui/dialogs/about_dialog.cpp`、`src/ui/sound_override_manager.cpp`、`src/accessibility/screen_reader_bridge.cpp`、`apps/updater/main.cpp`、`apps/updater/update_service.cpp`、`tools/build_release.ps1`、`tools/sign_release.py`、`tools/publish_update.py`、`tests/ui/test_main_window_shortcuts.cpp`、`installer\飞船斗地主.iss`、`assets\docs\*.txt`（全部改名）、`README.md`、`AGENTS.md`、`version.txt` 及相关文档。
-- 验证：`tools\build_release.ps1 -Package` 全量 Configure + Release 构建 + CTest 19/19（160.90 秒）；主程序依赖表确认不含 Qt6Network；主程序与更新器文件版本均为 1.9.0.0。
-- 正式发布：`version.txt` 升至 1.9；固定公钥清单签名成功；服务器 `windows/stable/1.9`、Release ID 71、`status=published`；0.9/1.7/1.8 均可发现 1.9，1.9 显示无更新，服务器回下载文件与本地安装包逐字节一致。
-- 开源仓库：1.9 源码、测试、文档与版本文件提交到 `origin/main`，发布标签为 `v1.9`。
-- 未完成：1.9 安装包的覆盖/全新安装、启动、快捷方式、卸载和用户数据保留验收，用户对正式 1.9 的实际试玩，四读屏完整人工验收及物理键盘钩子人工实测。
-
-八、新电脑灾备恢复
-
-- 源码与开发进度：新电脑登录 GitHub 后 `git clone https://github.com/y521wan-coder/feichuan-offline-doudizhu.git`，再按本文第五节安装同版本 Qt 与 MSVC 即可完整恢复代码、资源、测试与 Git 历史。
-- 固定发布私钥：加密私钥在 `C:\Users\apple007\Documents\飞船单机斗地主发布密钥\`；2026-09-23 已在 `D:\飞船斗地主发布密钥灾备` 生成离线灾备包（加密私钥、十六进制密码文件、固定公钥、密钥 ID、`recover-release-key.py` 与恢复说明）。DPAPI 凭据绑定原 Windows 用户，换机后失效，所以灾备包带的是可离线使用的十六进制密码。用户复制到安全位置后必须从 D 盘删除本包，并且私钥与密码文件要分开保存。
-- 服务器通道：发布还需要仓库外的服务器 SSH 私钥（当前为 `C:\apple1007`）。它同样不在仓库中，需单独备份；若丢失可在服务器侧重新签发。
-- 其余不在仓库中的内容：构建产物、绿色版目录、本机安装目录、`artifacts\` 下的历史验收证据与本机试用内核备份。这些都可以用源码重建，不属于必须备份项。
-- 恢复后先跑 `.\tools\build.ps1 -Preset release-x64 -Configure -Build -Test` 确认环境，再按第六节发布。
-
-九、2026-09-23 本机音效修复试用内核
-
-- 问题：二人、三人允许的三带一、飞机带单、四带二单、四带两对在 `src/core/audio/card_pattern_sound_plan.cpp` 中被直接跳过，出牌时无对应语音。只补齐这些牌型对已有 WAV 的调用，未修改规则、AI、键盘、朗读、更新器或资源文件。新增单副牌牌型音效测试于 `tests/core/test_card_pattern_sound_plan.cpp`。
-- 当前 1.9 源码增量构建与全量 CTest 19/19 通过；为与本机旧名称安装目录兼容，另以提交 `12b7be8` 的源码、相同音效修复和原 1.7 版本号构建试用 EXE。该兼容构建成功，CTest 18/19；失败目标 `test_main_window_shortcuts` 内两项读屏事件捕获断言，同机独立重跑 1.9 对应测试也出现事件捕获失败，未将兼容构建记为全绿，也未做人工读屏验收。
-- 用户正常退出游戏后，只替换 `C:\Program Files\飞船单机斗地主\飞船单机斗地主.exe`。安装目录 196 个文件逐一比对，唯一变化为此 EXE；当前 SHA-256 为 `150CDBF9D9E4DC9FAA5431C481F90EB23005CD0642D1C26C3515E3E67F17DBC5`，文件版本 1.7.0.0。旧试用内核备份为 `artifacts\kernel-replacement-20260923\backup\installed-game-before-audio-fix.exe`。未制作安装包、未签名、未联网发布、未启动安装版。
-- 用户随后已试玩确认这些牌型的音效恢复，并明确将本轮正式版本定为 2.0；发布结果见下一节。试用阶段之前的最近提交为 `d5b7f1e`。
-
-十、2026-09-23 正式发布 2.0（牌型音效修复）
-
-- 用户要求正式版本 2.0，发布到更新服务器并更新开源仓库；今后版本顺序为 2.0 到 2.9，然后 3.0，以此类推。仅把已试玩通过的四种单副牌牌型音效修复纳入正式版，`version.txt` 升为 2.0，内置更新日志增加对应说明。
-- 修改文件：`src/core/audio/card_pattern_sound_plan.cpp`、`tests/core/test_card_pattern_sound_plan.cpp`、`version.txt`、`assets/docs/飞船斗地主更新日志.txt`、`docs/开发日志.md`、`docs/测试与验收.md`、`docs/更新协议.md`、本文。未修改规则、AI、键盘、读屏或更新器代码。
-- `.\tools\build_release.ps1 -Package` 全量构建、CTest 19/19（162.56 秒）、Inno Setup 编译通过。安装包 61,995,229 字节，SHA-256 `2A4A4A65BA7E5E9290D9489C9AAC9040699DCA44BC5DFA80C5454B09F54BB83B`，Authenticode `NotSigned`；主程序与更新器文件版本 2.0.0.0，主程序依赖表不含 Qt6Network。
-- `python tools/sign_release.py` 生成固定公钥签名清单；`python tools/publish_update.py --ssh-key <仓库外私钥>` 发布 `windows/stable/2.0` 成功，Release ID 72、`status=published`。回下载安装包大小与 SHA-256 均一致（`SERVER_VERIFICATION=OK`），独立复验 API 签名通过，1.9 可发现 2.0、2.0 无更新。
-- 本机安装目录仍是用户已试玩的旧名称试用内核，未执行正式 2.0 的安装、启动、卸载或四读屏人工验收。下一步按需要完成这些人工验收；后续发布版本为 2.1。正式版源码提交 `05a3903`（`fix: release 2.0 card pattern sounds`）已推送 `origin/main`，注解标签 `v2.0` 已推送；本条状态由后续 `docs: record 2.0 publication` 文档提交补记。该提交完成后工作区应干净。
+- 新电脑恢复：克隆仓库后安装 Qt 6.8.3 MSVC 2022 x64，先跑全量构建与测试。发布私钥和服务器 SSH 私钥都只允许保存在仓库外，不得提交或写入日志。
+- 2.0 回退介质仍保留在 `D:\飞船斗地主-2.0回退\`，供确有需要时核验历史版本；它不再是当前正式基线。
+- 详细历史见 `docs\开发日志.md`；验收证据见 `docs\测试与验收.md`；规则见 `docs\规则规格.md`；更新边界见 `docs\更新协议.md`。
