@@ -299,7 +299,7 @@ public:
     bool readerSessionChanged() const { return m_readerSessionChanged; }
 
 private:
-    static constexpr const wchar_t* kChannelName = L"飞船单机斗地主";
+    static constexpr const wchar_t* kChannelName = L"飞船斗地主";
 
     std::vector<Backend> routingOrder() const {
         std::vector<Backend> order = backendsByMostRecentStart();

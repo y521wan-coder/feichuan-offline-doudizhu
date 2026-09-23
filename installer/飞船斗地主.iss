@@ -1,6 +1,6 @@
-﻿#define AppName "飞船单机斗地主"
+#define AppName "飞船斗地主"
 #define AppPublisher "飞船"
-#define AppExeName "飞船单机斗地主.exe"
+#define AppExeName "飞船斗地主.exe"
 
 #ifndef AppVersion
   #error AppVersion must be provided by the build script
@@ -39,7 +39,7 @@ VersionInfoProductName={#AppName}
 VersionInfoDescription={#AppName} 安装程序
 VersionInfoCompany={#AppPublisher}
 SetupMutex=FeichuanOfflineDoudizhuInstallerMutex
-InfoBeforeFile={#SourceDir}\docs\飞船单机斗地主免费版与隐私说明.txt
+InfoBeforeFile={#SourceDir}\docs\飞船斗地主免费版与隐私说明.txt
 
 [Languages]
 Name: "chinesesimp"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
@@ -51,6 +51,12 @@ Source: "{#SourceDir}\vc_redist.x64.exe"; DestDir: "{tmp}"; Flags: deleteafterin
 [InstallDelete]
 Type: files; Name: "{userdesktop}\四人斗地主.lnk"
 Type: files; Name: "{commondesktop}\四人斗地主.lnk"
+Type: files; Name: "{userdesktop}\飞船单机斗地主.lnk"
+Type: files; Name: "{commondesktop}\飞船单机斗地主.lnk"
+Type: files; Name: "{autoprograms}\飞船单机斗地主.lnk"
+Type: files; Name: "{app}\飞船单机斗地主.exe"
+Type: files; Name: "{app}\飞船单机斗地主更新器.exe"
+Type: files; Name: "{app}\docs\飞船单机斗地主*.txt"
 Type: files; Name: "{app}\nvdaControllerClient64.dll"
 Type: files; Name: "{app}\licenses\NVDA-Controller-Client-LGPL-2.1.txt"
 Type: files; Name: "{app}\Qt6Sql.dll"

@@ -18,14 +18,14 @@ if(WINDEPLOYQT_EXECUTABLE)
                 --no-translations
                 --no-system-d3d-compiler
                 --no-opengl-sw
-                \"\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}/飞船单机斗地主.exe\"
+                \"\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}/飞船斗地主.exe\"
         )
         execute_process(
             COMMAND \"${WINDEPLOYQT_EXECUTABLE}\"
                 --no-translations
                 --no-system-d3d-compiler
                 --no-opengl-sw
-                \"\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}/飞船单机斗地主更新器.exe\"
+                \"\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}/飞船斗地主更新器.exe\"
         )
     ")
 endif()

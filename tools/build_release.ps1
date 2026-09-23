@@ -5,8 +5,8 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-$gameName = -join @([char]0x98DE, [char]0x8239, [char]0x5355, [char]0x673A,
-    [char]0x6597, [char]0x5730, [char]0x4E3B)
+$gameName = -join @([char]0x98DE, [char]0x8239, [char]0x6597, [char]0x5730,
+    [char]0x4E3B)
 $updaterName = $gameName + (-join @([char]0x66F4, [char]0x65B0, [char]0x5668))
 $gameFileName = $gameName + '.exe'
 $updaterFileName = $updaterName + '.exe'

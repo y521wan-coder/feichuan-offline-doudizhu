@@ -172,7 +172,7 @@ void UpdateService::downloadAndVerify(const UpdateCheckResult& update) {
         emit downloadFinished({}, QString::fromUtf8(u8"无法创建更新临时目录。"));
         return;
     }
-    m_downloadPath = directory + QString::fromUtf8(u8"/飞船单机斗地主-Setup-") +
+    m_downloadPath = directory + QString::fromUtf8(u8"/飞船斗地主-Setup-") +
                      update.latestVersion + QStringLiteral(".exe");
     m_downloadFile.setFileName(m_downloadPath);
     if (!m_downloadFile.open(QIODevice::WriteOnly | QIODevice::Truncate)) {

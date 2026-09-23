@@ -8,7 +8,7 @@ import urllib.request
 import uuid
 from pathlib import Path
 
-PRODUCT_NAME = "飞船单机斗地主"
+PRODUCT_NAME = "飞船斗地主"
 PRODUCT_KEY = "feichuan_offline_doudizhu"
 PLATFORM = "windows"
 CHANNEL = "stable"
@@ -53,7 +53,7 @@ def check_api(version, manifest):
 def main():
     root = Path(__file__).resolve().parent.parent
     version = (root / "version.txt").read_text(encoding="utf-8-sig").strip()
-    parser = argparse.ArgumentParser(description="安全上传并发布飞船单机斗地主 stable 安装包")
+    parser = argparse.ArgumentParser(description="安全上传并发布飞船斗地主 stable 安装包")
     parser.add_argument("--ssh-key", required=True)
     parser.add_argument("--remote-host", default="root@154.23.163.68")
     parser.add_argument("--manifest", default=str(root / "releases" / f"{PRODUCT_NAME}-Setup-{version}.release-manifest.json"))

@@ -149,9 +149,9 @@ add_executable(FeichuanOfflineDoudizhu
     assets/app.qrc
 )
 if(WIN32)
-    set(FPDZ_FILE_DESCRIPTION "飞船单机斗地主")
+    set(FPDZ_FILE_DESCRIPTION "飞船斗地主")
     set(FPDZ_INTERNAL_NAME "FeichuanOfflineDoudizhu")
-    set(FPDZ_ORIGINAL_FILENAME "飞船单机斗地主.exe")
+    set(FPDZ_ORIGINAL_FILENAME "飞船斗地主.exe")
     configure_file(cmake/windows_version.rc.in
         "${CMAKE_CURRENT_BINARY_DIR}/generated/game_version.rc" @ONLY)
     target_sources(FeichuanOfflineDoudizhu PRIVATE
@@ -162,7 +162,7 @@ target_link_libraries(FeichuanOfflineDoudizhu PRIVATE
     Qt6::Core Qt6::Widgets winmm.lib
 )
 set_target_properties(FeichuanOfflineDoudizhu PROPERTIES
-    OUTPUT_NAME "飞船单机斗地主"
+    OUTPUT_NAME "飞船斗地主"
     WIN32_EXECUTABLE $<CONFIG:Release>
     AUTOMOC ON
     AUTORCC ON
@@ -215,9 +215,9 @@ add_executable(FeichuanOfflineDoudizhuUpdater
     apps/updater/updater.qrc
 )
 if(WIN32)
-    set(FPDZ_FILE_DESCRIPTION "飞船单机斗地主更新器")
+    set(FPDZ_FILE_DESCRIPTION "飞船斗地主更新器")
     set(FPDZ_INTERNAL_NAME "FeichuanOfflineDoudizhuUpdater")
-    set(FPDZ_ORIGINAL_FILENAME "飞船单机斗地主更新器.exe")
+    set(FPDZ_ORIGINAL_FILENAME "飞船斗地主更新器.exe")
     configure_file(cmake/windows_version.rc.in
         "${CMAKE_CURRENT_BINARY_DIR}/generated/updater_version.rc" @ONLY)
     target_sources(FeichuanOfflineDoudizhuUpdater PRIVATE
@@ -233,7 +233,7 @@ target_compile_definitions(FeichuanOfflineDoudizhuUpdater PRIVATE
     FPDZ_APP_VERSION="${FPDZ_VERSION}"
 )
 set_target_properties(FeichuanOfflineDoudizhuUpdater PROPERTIES
-    OUTPUT_NAME "飞船单机斗地主更新器"
+    OUTPUT_NAME "飞船斗地主更新器"
     WIN32_EXECUTABLE $<CONFIG:Release>
     AUTOMOC ON
 )

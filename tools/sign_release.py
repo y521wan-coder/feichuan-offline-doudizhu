@@ -34,7 +34,7 @@ def unprotect_for_current_user(data: bytes) -> bytes:
             kernel32.LocalFree(description)
         kernel32.LocalFree(output.pbData)
 
-PRODUCT_NAME = "飞船单机斗地主"
+PRODUCT_NAME = "飞船斗地主"
 PRODUCT_KEY = "feichuan_offline_doudizhu"
 PLATFORM = "windows"
 CHANNEL = "stable"
@@ -43,7 +43,7 @@ CHANNEL = "stable"
 def main():
     root = Path(__file__).resolve().parent.parent
     version = (root / "version.txt").read_text(encoding="utf-8-sig").strip()
-    parser = argparse.ArgumentParser(description="生成飞船单机斗地主固定公钥发布清单")
+    parser = argparse.ArgumentParser(description="生成飞船斗地主固定公钥发布清单")
     parser.add_argument("--installer", default=str(root / "releases" / f"{PRODUCT_NAME}-Setup-{version}.exe"))
     parser.add_argument("--private-key", default=str(Path.home() / "Documents" / "飞船单机斗地主发布密钥" / "release-signing-private.pem"))
     parser.add_argument("--public-key", default=str(root / "assets" / "update" / "release-signing-public.pem"))

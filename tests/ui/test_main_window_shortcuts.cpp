@@ -378,13 +378,13 @@ private slots:
 
         const std::array<std::pair<QString, QString>, 4> cases = {{
             {QStringLiteral("shortcutHelpAction"),
-             QString::fromUtf8(u8"飞船单机斗地主快捷键说明.txt")},
+             QString::fromUtf8(u8"飞船斗地主快捷键说明.txt")},
             {QStringLiteral("rulesHelpAction"),
-             QString::fromUtf8(u8"飞船单机斗地主玩法说明.txt")},
+             QString::fromUtf8(u8"飞船斗地主玩法说明.txt")},
             {QStringLiteral("userGuideAction"),
-             QString::fromUtf8(u8"飞船单机斗地主详细使用说明.txt")},
+             QString::fromUtf8(u8"飞船斗地主详细使用说明.txt")},
             {QStringLiteral("changelogAction"),
-             QString::fromUtf8(u8"飞船单机斗地主更新日志.txt")}
+             QString::fromUtf8(u8"飞船斗地主更新日志.txt")}
         }};
         for (const auto& [objectName, fileName] : cases) {
             auto* action = window.findChild<QAction*>(objectName);
@@ -421,7 +421,7 @@ private slots:
         QApplication::clipboard()->clear();
         action->trigger();
         const QString report = QApplication::clipboard()->text();
-        QVERIFY(report.contains(QString::fromUtf8(u8"飞船单机斗地主诊断报告")));
+        QVERIFY(report.contains(QString::fromUtf8(u8"飞船斗地主诊断报告")));
         QVERIFY(report.contains(QStringLiteral("读屏状态")));
         QVERIFY(report.contains(QStringLiteral("当前朗读路线")));
         QVERIFY(!report.contains(QStringLiteral("screen_reader_compatibility_mode")));

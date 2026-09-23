@@ -4,7 +4,7 @@
 namespace fpdz {
 Application::Application(int& argc, char** argv) : QApplication(argc, argv) {
     setApplicationName("feichuan_offline_doudizhu");
-    setApplicationDisplayName(QString::fromUtf8(u8"飞船单机斗地主"));
+    setApplicationDisplayName(QString::fromUtf8(u8"飞船斗地主"));
     setApplicationVersion(FPDZ_APP_VERSION);
     setOrganizationName("Feichuan");
 }

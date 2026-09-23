@@ -24,7 +24,7 @@ BEGIN
             VALUE "InternalName", "@FPDZ_INTERNAL_NAME@\0"
             VALUE "LegalCopyright", "Copyright (C) 2026 飞船\0"
             VALUE "OriginalFilename", "@FPDZ_ORIGINAL_FILENAME@\0"
-            VALUE "ProductName", "飞船单机斗地主\0"
+            VALUE "ProductName", "飞船斗地主\0"
             VALUE "ProductVersion", "@PROJECT_VERSION_MAJOR@.@PROJECT_VERSION_MINOR@.@FPDZ_VERSION_PATCH@.0\0"
         END
     END

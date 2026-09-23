@@ -12,7 +12,7 @@ using namespace fpdz;
 int main(int argc, char* argv[]) {
     QApplication app(argc, argv);
     app.setApplicationName(QStringLiteral("feichuan_offline_doudizhu_updater"));
-    app.setApplicationDisplayName(QString::fromUtf8(u8"飞船单机斗地主更新器"));
+    app.setApplicationDisplayName(QString::fromUtf8(u8"飞船斗地主更新器"));
     app.setApplicationVersion(QStringLiteral(FPDZ_APP_VERSION));
 
     const QStringList arguments = QCoreApplication::arguments();
@@ -49,7 +49,7 @@ int main(int argc, char* argv[]) {
             }
             progress = new QProgressDialog(QString::fromUtf8(u8"正在下载并验证更新……"),
                                            QString::fromUtf8(u8"取消"), 0, 1000);
-            progress->setWindowTitle(QString::fromUtf8(u8"飞船单机斗地主更新器"));
+            progress->setWindowTitle(QString::fromUtf8(u8"飞船斗地主更新器"));
             progress->setMinimumDuration(0);
             QObject::connect(progress, &QProgressDialog::canceled,
                              &service, &UpdateService::cancel);

@@ -78,12 +78,12 @@ namespace fpdz {
 namespace {
 
 constexpr int kFirstRunGuideRevision = 2;
-const auto kStartupUpdateGuideFileName = u8"飞船单机斗地主更新说明.txt";
-const auto kDetailedGuideFileName = u8"飞船单机斗地主详细使用说明.txt";
-const auto kRulesFileName = u8"飞船单机斗地主玩法说明.txt";
-const auto kShortcutsFileName = u8"飞船单机斗地主快捷键说明.txt";
-const auto kSoundGuideFileName = u8"飞船单机斗地主音效分类与替换说明.txt";
-const auto kChangelogFileName = u8"飞船单机斗地主更新日志.txt";
+const auto kStartupUpdateGuideFileName = u8"飞船斗地主更新说明.txt";
+const auto kDetailedGuideFileName = u8"飞船斗地主详细使用说明.txt";
+const auto kRulesFileName = u8"飞船斗地主玩法说明.txt";
+const auto kShortcutsFileName = u8"飞船斗地主快捷键说明.txt";
+const auto kSoundGuideFileName = u8"飞船斗地主音效分类与替换说明.txt";
+const auto kChangelogFileName = u8"飞船斗地主更新日志.txt";
 
 std::wstring formatCardSelectionGroup(Rank rank, int count) {
     // Picking up and putting down a rank group must use exactly the same
@@ -543,7 +543,7 @@ MainWindow::MainWindow(GameEngine& engine, AccessibilityService& accessibility,
 #ifdef Q_OS_WIN
     g_openMenuCount = 0;
 #endif
-    setWindowTitle(QString::fromUtf8(u8"飞船单机斗地主"));
+    setWindowTitle(QString::fromUtf8(u8"飞船斗地主"));
     setMinimumSize(800, 600);
     m_handModel = std::make_unique<HandListModel>();
     m_playerModel = std::make_unique<PlayerStatusModel>();
@@ -788,7 +788,7 @@ void MainWindow::setupMenus() {
     connect(aboutAction, &QAction::triggered, this, [this]() {
         QMessageBox::about(this,
             QString::fromStdWString(L"关于"),
-            QString::fromUtf8(u8"飞船单机斗地主 V") +
+            QString::fromUtf8(u8"飞船斗地主 V") +
                 QCoreApplication::applicationVersion() +
                 QString::fromUtf8(u8"\n无障碍 Windows 单机游戏"));
     });
@@ -2632,7 +2632,7 @@ void MainWindow::showDonateDialog() {
 
 void MainWindow::checkForUpdates(bool manual) {
     const QString updaterPath = QDir(QCoreApplication::applicationDirPath()).filePath(
-        QString::fromUtf8(u8"飞船单机斗地主更新器.exe"));
+        QString::fromUtf8(u8"飞船斗地主更新器.exe"));
     const QStringList arguments{
         manual ? QStringLiteral("--manual") : QStringLiteral("--automatic"),
         QStringLiteral("--current-version"), QCoreApplication::applicationVersion()};
@@ -2640,7 +2640,7 @@ void MainWindow::checkForUpdates(bool manual) {
         !QProcess::startDetached(updaterPath, arguments)) {
         if (manual) {
             QMessageBox::warning(this, QString::fromUtf8(u8"无法启动更新器"),
-                QString::fromUtf8(u8"未找到或无法启动“飞船单机斗地主更新器.exe”。游戏可继续离线运行。"));
+                QString::fromUtf8(u8"未找到或无法启动“飞船斗地主更新器.exe”。游戏可继续离线运行。"));
         }
         return;
     }
@@ -2997,7 +2997,7 @@ QString MainWindow::buildDiagnosticReport() const {
     const auto snapshot = m_engine.state().publicSnapshot();
     const QWidget* focus = QApplication::focusWidget();
 
-    out << "飞船单机斗地主诊断报告\n";
+    out << "飞船斗地主诊断报告\n";
     out << "报告格式版本: 6\n";
     out << "生成时间: " << QDateTime::currentDateTime().toString(Qt::ISODateWithMs) << "\n";
     out << "应用版本: " << QCoreApplication::applicationVersion() << "\n";
@@ -3019,7 +3019,7 @@ QString MainWindow::buildDiagnosticReport() const {
 
     out << "\n[关键组件]\n";
     const QStringList components = {
-        QString::fromUtf8(u8"飞船单机斗地主.exe"), QStringLiteral("Qt6Core.dll"),
+        QString::fromUtf8(u8"飞船斗地主.exe"), QStringLiteral("Qt6Core.dll"),
         QStringLiteral("Qt6Gui.dll"), QStringLiteral("Qt6Widgets.dll"),
         QStringLiteral("platforms/qwindows.dll")
     };
