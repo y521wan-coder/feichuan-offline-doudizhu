@@ -96,4 +96,4 @@
 - 修改文件：`src/core/audio/card_pattern_sound_plan.cpp`、`tests/core/test_card_pattern_sound_plan.cpp`、`version.txt`、`assets/docs/飞船斗地主更新日志.txt`、`docs/开发日志.md`、`docs/测试与验收.md`、`docs/更新协议.md`、本文。未修改规则、AI、键盘、读屏或更新器代码。
 - `.\tools\build_release.ps1 -Package` 全量构建、CTest 19/19（162.56 秒）、Inno Setup 编译通过。安装包 61,995,229 字节，SHA-256 `2A4A4A65BA7E5E9290D9489C9AAC9040699DCA44BC5DFA80C5454B09F54BB83B`，Authenticode `NotSigned`；主程序与更新器文件版本 2.0.0.0，主程序依赖表不含 Qt6Network。
 - `python tools/sign_release.py` 生成固定公钥签名清单；`python tools/publish_update.py --ssh-key <仓库外私钥>` 发布 `windows/stable/2.0` 成功，Release ID 72、`status=published`。回下载安装包大小与 SHA-256 均一致（`SERVER_VERIFICATION=OK`），独立复验 API 签名通过，1.9 可发现 2.0、2.0 无更新。
-- 本机安装目录仍是用户已试玩的旧名称试用内核，未执行正式 2.0 的安装、启动、卸载或四读屏人工验收。下一步按需要完成这些人工验收；后续发布版本为 2.1。发布前最近提交为 `d5b7f1e`；本轮拟以 `fix: release 2.0 card pattern sounds` 提交并推送 `origin/main` 与 `v2.0` 标签，完成后工作区应干净。
+- 本机安装目录仍是用户已试玩的旧名称试用内核，未执行正式 2.0 的安装、启动、卸载或四读屏人工验收。下一步按需要完成这些人工验收；后续发布版本为 2.1。正式版源码提交 `05a3903`（`fix: release 2.0 card pattern sounds`）已推送 `origin/main`，注解标签 `v2.0` 已推送；本条状态由后续 `docs: record 2.0 publication` 文档提交补记。该提交完成后工作区应干净。
