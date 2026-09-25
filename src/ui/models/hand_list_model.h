@@ -42,6 +42,8 @@ public:
     int lastGroupStartRow() const;
     int previousBrowsableGroupStartRow(int row) const;
     int nextBrowsableGroupStartRow(int row) const;
+    int previousBrowsableMultiCardGroupStartRow(int row) const;
+    int nextBrowsableMultiCardGroupStartRow(int row) const;
     int lastBrowsableGroupStartRow() const;
     void setGroupSelected(int row, bool selected);
     GroupSelectionResult selectGroup(int row);

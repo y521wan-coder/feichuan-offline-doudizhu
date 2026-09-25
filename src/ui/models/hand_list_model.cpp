@@ -224,6 +224,41 @@ int HandListModel::nextBrowsableGroupStartRow(int row) const {
     }
     return lastBrowsableGroupStartRow();
 }
+int HandListModel::previousBrowsableMultiCardGroupStartRow(int row) const {
+    if (m_cards.empty()) return -1;
+    const Rank currentRank = m_cards[std::clamp(row, 0, static_cast<int>(m_cards.size()) - 1)].rank();
+    int result = -1;
+    for (int current = 0; current < static_cast<int>(m_cards.size()); ++current) {
+        const Rank rank = m_cards[current].rank();
+        if (!m_selected[current] && rank < currentRank &&
+            unselectedCountOfRank(rank) >= 2 &&
+            (result < 0 || rank > m_cards[result].rank())) {
+            result = current;
+        }
+    }
+    if (result >= 0) return result;
+    if (unselectedCountOfRank(currentRank) < 2) return -1;
+    for (int current = 0; current < static_cast<int>(m_cards.size()); ++current) {
+        if (!m_selected[current] && m_cards[current].rank() == currentRank) return current;
+    }
+    return -1;
+}
+int HandListModel::nextBrowsableMultiCardGroupStartRow(int row) const {
+    if (m_cards.empty()) return -1;
+    const Rank currentRank = m_cards[std::clamp(row, 0, static_cast<int>(m_cards.size()) - 1)].rank();
+    for (int current = 0; current < static_cast<int>(m_cards.size()); ++current) {
+        const Rank rank = m_cards[current].rank();
+        if (!m_selected[current] && rank > currentRank &&
+            unselectedCountOfRank(rank) >= 2) {
+            return current;
+        }
+    }
+    if (unselectedCountOfRank(currentRank) < 2) return -1;
+    for (int current = 0; current < static_cast<int>(m_cards.size()); ++current) {
+        if (!m_selected[current] && m_cards[current].rank() == currentRank) return current;
+    }
+    return -1;
+}
 int HandListModel::lastBrowsableGroupStartRow() const {
     int result = -1;
     for (int current = 0; current < static_cast<int>(m_cards.size()); ++current) {

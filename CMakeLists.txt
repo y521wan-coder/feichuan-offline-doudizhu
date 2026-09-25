@@ -57,10 +57,13 @@ fpdz_apply_warnings(fpdz_core)
 
 # AI library
 add_library(fpdz_ai STATIC
+    src/ai/ai_decision_request.cpp
+    src/app/ai_battle_types.cpp
     src/ai/ai_level_profile.cpp
     src/ai/farmer_team_strategy.cpp
     src/ai/landlord_strategy.cpp
     src/ai/legal_move_generator.cpp
+    src/ai/local_ai_decision_adapter.cpp
     src/ai/bidding_strategy.cpp
     src/ai/simple_ai.cpp
     src/ai/standard_ai.cpp
@@ -83,6 +86,7 @@ add_library(fpdz_persistence STATIC
     src/persistence/replay_repository.cpp
     src/persistence/log_service.cpp
     src/persistence/diagnostic_trace_service.cpp
+    src/persistence/ai_battle_statistics_repository.cpp
 )
 set_target_properties(fpdz_persistence PROPERTIES AUTOMOC ON)
 target_include_directories(fpdz_persistence PUBLIC "${CMAKE_SOURCE_DIR}/src")
@@ -102,6 +106,7 @@ fpdz_apply_warnings(fpdz_accessibility)
 
 # Application library
 add_library(fpdz_app STATIC
+    src/app/ai_service_client.cpp
     src/app/application.cpp
     src/app/service_registry.cpp
     src/app/app_settings.cpp
@@ -118,6 +123,7 @@ fpdz_apply_warnings(fpdz_app)
 # UI library
 add_library(fpdz_ui STATIC
     src/ui/main_window.cpp
+    src/ui/mode_selection_window.cpp
     src/ui/models/hand_list_model.cpp
     src/ui/models/player_status_model.cpp
     src/ui/widgets/hand_view.cpp
@@ -127,6 +133,8 @@ add_library(fpdz_ui STATIC
     src/ui/widgets/game_status_widget.cpp
     src/ui/widgets/player_status_widget.cpp
     src/ui/dialogs/settings_dialog.cpp
+    src/ui/dialogs/ai_battle_settings_dialog.cpp
+    src/ui/dialogs/credential_manager_dialog.cpp
     src/ui/dialogs/sound_manager_dialog.cpp
     src/ui/dialogs/shortcut_dialog.cpp
     src/ui/dialogs/result_dialog.cpp
@@ -146,6 +154,7 @@ fpdz_apply_warnings(fpdz_ui)
 # Main executable
 add_executable(FeichuanOfflineDoudizhu
     src/main.cpp
+    src/app/startup_controller.cpp
     assets/app.qrc
 )
 if(WIN32)
@@ -205,7 +214,7 @@ add_custom_command(TARGET FeichuanOfflineDoudizhu POST_BUILD
     COMMENT "Deploying Qt DLLs for FeichuanOfflineDoudizhu"
 )
 
-# Independent Windows updater. This is the only product target that links Qt Network.
+# Independent Windows updater. Only this updater and the isolated AI service link Qt Network.
 add_executable(FeichuanOfflineDoudizhuUpdater
     apps/updater/main.cpp
     apps/updater/update_service.cpp
@@ -245,6 +254,44 @@ add_custom_command(TARGET FeichuanOfflineDoudizhuUpdater POST_BUILD
         "${_qt6_bin}/Qt6Widgets$<$<CONFIG:Debug>:d>.dll"
         "${_qt6_bin}/Qt6Network$<$<CONFIG:Debug>:d>.dll"
         "$<TARGET_FILE_DIR:FeichuanOfflineDoudizhuUpdater>"
+    COMMAND ${CMAKE_COMMAND} -E make_directory
+        "$<TARGET_FILE_DIR:FeichuanOfflineDoudizhuUpdater>/tls"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${_qt6_plugins}/tls/qschannelbackend$<$<CONFIG:Debug>:d>.dll"
+        "$<TARGET_FILE_DIR:FeichuanOfflineDoudizhuUpdater>/tls"
+)
+
+# Independent cloud-AI service. Like the updater, this process is isolated from
+# the game executable and is allowed to link Qt Network.
+add_executable(FeichuanDoudizhuAiService
+    apps/ai_service/main.cpp
+    apps/ai_service/ai_service.cpp
+    apps/ai_service/ai_service.h
+    apps/ai_service/credential_store.cpp
+    apps/ai_service/credential_store.h
+)
+target_include_directories(FeichuanDoudizhuAiService PRIVATE
+    "${CMAKE_SOURCE_DIR}/apps/ai_service"
+)
+target_link_libraries(FeichuanDoudizhuAiService PRIVATE
+    Qt6::Core Qt6::Network crypt32
+)
+set_target_properties(FeichuanDoudizhuAiService PROPERTIES
+    OUTPUT_NAME "飞船斗地主AI服务"
+    WIN32_EXECUTABLE OFF
+    AUTOMOC ON
+)
+fpdz_apply_warnings(FeichuanDoudizhuAiService)
+add_custom_command(TARGET FeichuanDoudizhuAiService POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${_qt6_bin}/Qt6Core$<$<CONFIG:Debug>:d>.dll"
+        "${_qt6_bin}/Qt6Network$<$<CONFIG:Debug>:d>.dll"
+        "$<TARGET_FILE_DIR:FeichuanDoudizhuAiService>"
+    COMMAND ${CMAKE_COMMAND} -E make_directory
+        "$<TARGET_FILE_DIR:FeichuanDoudizhuAiService>/tls"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${_qt6_plugins}/tls/qschannelbackend$<$<CONFIG:Debug>:d>.dll"
+        "$<TARGET_FILE_DIR:FeichuanDoudizhuAiService>/tls"
 )
 # Testing
 enable_testing()

@@ -15,6 +15,12 @@ QString DataPaths::settingsFile() { return appDataDir() + "/settings.json"; }
 QString DataPaths::statisticsFile() { return appDataDir() + "/statistics.json"; }
 QString DataPaths::autoSaveFile() { return savesDir() + "/autosave.json"; }
 QString DataPaths::autoSaveBackupFile() { return savesDir() + "/autosave.backup.json"; }
+QString DataPaths::aiBattleDir() { return appDataDir() + "/ai_battle"; }
+QString DataPaths::aiBattleSettingsFile() { return aiBattleDir() + "/settings.json"; }
+QString DataPaths::aiBattleCredentialsFile() { return aiBattleDir() + "/credentials.dat"; }
+QString DataPaths::aiBattleStatisticsFile() { return aiBattleDir() + "/statistics.json"; }
+QString DataPaths::aiBattleLogsDir() { return aiBattleDir() + "/logs"; }
+QString DataPaths::aiBattleReplaysDir() { return aiBattleDir() + "/replays"; }
 
 void DataPaths::ensureDirectories() {
     QDir().mkpath(appDataDir());
@@ -22,6 +28,9 @@ void DataPaths::ensureDirectories() {
     QDir().mkpath(logsDir());
     QDir().mkpath(replaysDir());
     QDir().mkpath(customSoundsDir());
+    QDir().mkpath(aiBattleDir());
+    QDir().mkpath(aiBattleLogsDir());
+    QDir().mkpath(aiBattleReplaysDir());
 }
 
 } // namespace fpdz

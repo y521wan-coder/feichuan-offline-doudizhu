@@ -16,6 +16,12 @@ public:
     static QString statisticsFile();
     static QString autoSaveFile();
     static QString autoSaveBackupFile();
+    static QString aiBattleDir();
+    static QString aiBattleSettingsFile();
+    static QString aiBattleCredentialsFile();
+    static QString aiBattleStatisticsFile();
+    static QString aiBattleLogsDir();
+    static QString aiBattleReplaysDir();
     static void ensureDirectories();
 };
 

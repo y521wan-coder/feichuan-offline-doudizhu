@@ -14,10 +14,14 @@ private slots:
         CardPattern kingBomb;
         kingBomb.type = CardPatternType::KingBomb;
         QCOMPARE(CardTextFormatter::formatPlayedCards(kingBomb, {}), std::wstring(L"王炸"));
+        QCOMPARE(CardTextFormatter::formatPlayedCards(kingBomb, {}, 4), std::wstring(L"双王枪毙"));
+        QCOMPARE(patternTypeName(CardPatternType::KingBomb, 4), std::wstring(L"双王枪毙"));
 
         CardPattern doubleKingBomb;
         doubleKingBomb.type = CardPatternType::HeavenlyLord;
         QCOMPARE(CardTextFormatter::formatPlayedCards(doubleKingBomb, {}), std::wstring(L"天尊"));
+        QCOMPARE(CardTextFormatter::formatPlayedCards(doubleKingBomb, {}, 4), std::wstring(L"天尊无敌"));
+        QCOMPARE(patternTypeName(CardPatternType::HeavenlyLord, 4), std::wstring(L"天尊无敌"));
     }
 
     void testRankSpeechUsesWanerbaNames() {
@@ -103,20 +107,22 @@ private slots:
 
     void testAirplaneWithPairsSpeechKeepsEveryComponent() {
         std::vector<Card> airplane;
-        for (int i = 0; i < 5; ++i) {
+        for (int i = 0; i < 3; ++i) {
             airplane.push_back(Card::create(Rank::Three,
-                static_cast<Suit>(i % 4), static_cast<DeckIndex>(i / 4)));
+                static_cast<Suit>(i), 0));
         }
         for (int i = 0; i < 3; ++i) {
             airplane.push_back(Card::create(Rank::Four, static_cast<Suit>(i), 0));
         }
         airplane.push_back(Card::create(Rank::Two, Suit::Spades, 0));
         airplane.push_back(Card::create(Rank::Two, Suit::Hearts, 0));
+        airplane.push_back(Card::create(Rank::Five, Suit::Spades, 0));
+        airplane.push_back(Card::create(Rank::Five, Suit::Hearts, 0));
         const auto airplanePattern = PatternAnalyzer::analyze(airplane);
         QCOMPARE(airplanePattern.type, CardPatternType::AirplaneWithPairs);
         QCOMPARE(QString::fromStdWString(
                      CardTextFormatter::formatPlayedCards(airplanePattern, airplane)),
-                 QString::fromUtf8(u8"3、4，飞机，带对2、对3"));
+                 QString::fromUtf8(u8"3、4，飞机，带对2、对5"));
     }
 
     void testCardWithSelectionIgnoresSelectionAndPosition() {

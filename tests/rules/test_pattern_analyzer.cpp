@@ -120,7 +120,7 @@ private slots:
         QCOMPARE(p.mainLength, 3);
     }
 
-    void testAirplaneAllowsPairWingMatchingBodyRank() {
+    void testFourPlayerAirplaneRejectsPairWingMatchingBodyRank() {
         std::vector<Card> cards;
         const Suit suits[] = {Suit::Spades, Suit::Hearts, Suit::Clubs, Suit::Diamonds};
         for (int i = 0; i < 5; ++i) {
@@ -133,7 +133,19 @@ private slots:
         cards.push_back(Card::create(Rank::Two, Suit::Spades, 0));
         cards.push_back(Card::create(Rank::Two, Suit::Hearts, 0));
 
-        const auto pattern = PatternAnalyzer::analyze(cards);
+        QCOMPARE(PatternAnalyzer::analyze(cards, PLAYER_COUNT).type,
+                 CardPatternType::Invalid);
+
+        std::vector<Card> distinctWings;
+        for (int i = 0; i < 3; ++i) {
+            distinctWings.push_back(Card::create(Rank::Three, suits[i], 0));
+            distinctWings.push_back(Card::create(Rank::Four, suits[i], 0));
+        }
+        distinctWings.push_back(Card::create(Rank::Five, Suit::Spades, 0));
+        distinctWings.push_back(Card::create(Rank::Five, Suit::Hearts, 0));
+        distinctWings.push_back(Card::create(Rank::Six, Suit::Spades, 0));
+        distinctWings.push_back(Card::create(Rank::Six, Suit::Hearts, 0));
+        const auto pattern = PatternAnalyzer::analyze(distinctWings, PLAYER_COUNT);
         QCOMPARE(pattern.type, CardPatternType::AirplaneWithPairs);
         QCOMPARE(pattern.mainRank, Rank::Three);
         QCOMPARE(pattern.mainLength, 2);

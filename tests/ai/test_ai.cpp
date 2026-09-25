@@ -1,13 +1,17 @@
 #include <QtTest>
 #include <QJsonArray>
+#include <QJsonDocument>
+#include <QSet>
 #include <algorithm>
 #include <array>
 #include <chrono>
 #include <set>
 
 #include "ai/ai_level_profile.h"
+#include "ai/ai_decision_request.h"
 #include "ai/bidding_strategy.h"
 #include "ai/legal_move_generator.h"
+#include "ai/local_ai_decision_adapter.h"
 #include "ai/simple_ai.h"
 #include "ai/standard_ai.h"
 #include "ai/strategic_search_evaluator.h"
@@ -42,6 +46,221 @@ bool containsResponse(const std::vector<LegalMove>& moves, CardPatternType type,
 class TestAi : public QObject {
     Q_OBJECT
 private slots:
+    void testAiBattleUsesOneFastModeAndTenSecondDefault() {
+        AiBattleSettings settings;
+        QVERIFY(settings.landlordMustLeadFirstTurn);
+        QVERIFY(AiBattleSettings::fromJson(QJsonObject{}).landlordMustLeadFirstTurn);
+        settings.landlordMustLeadFirstTurn = false;
+        QVERIFY(!AiBattleSettings::fromJson(settings.toJson()).landlordMustLeadFirstTurn);
+        settings.landlordMustLeadFirstTurn = true;
+        QCOMPARE(settings.autoPassSeconds, 30);
+        QVERIFY(settings.autoPassEnabled);
+        settings.autoPassSeconds = 1800;
+        QCOMPARE(AiBattleSettings::fromJson(settings.toJson()).autoPassSeconds, 1800);
+        settings.autoPassSeconds = 9999;
+        settings.normalize();
+        QCOMPARE(settings.autoPassSeconds, 1800);
+        settings.autoPassSeconds = 1;
+        settings.normalize();
+        QCOMPARE(settings.autoPassSeconds, 3);
+        settings.autoPassEnabled = false;
+        QCOMPARE(AiBattleSettings::fromJson(settings.toJson()).autoPassEnabled, false);
+        settings.autoPassEnabled = true;
+        settings.autoPassSeconds = 30;
+        settings.playerCount = TWO_PLAYER_COUNT;
+        auto& cloud = settings.seats[1];
+        cloud.kind = SeatControllerKind::CloudAi;
+        cloud.credentialId = QStringLiteral("test-credential");
+        cloud.model = QStringLiteral("deepseek-v4-flash");
+        cloud.strength = CloudStrength::Deep;
+        settings.normalize();
+        settings.strategyPrompt = QString::fromUtf8(u8"先计算本队出完的手数");
+        QCOMPARE(AiBattleSettings::fromJson(settings.toJson()).strategyPrompt,
+                 settings.strategyPrompt);
+
+        QString reason;
+        QVERIFY(settings.validForStart(&reason));
+        QCOMPARE(settings.seats[1].strength, CloudStrength::Fast);
+        QCOMPARE(settings.seats[1].timeoutSeconds, 10);
+
+        QJsonObject legacy = settings.toJson();
+        legacy[QStringLiteral("schemaVersion")] = 1;
+        QJsonArray seats = legacy.value("seats").toArray();
+        QJsonObject oldCloud = seats.at(1).toObject();
+        oldCloud[QStringLiteral("strength")] = static_cast<int>(CloudStrength::Deep);
+        oldCloud[QStringLiteral("timeoutSeconds")] = 15;
+        seats[1] = oldCloud;
+        legacy[QStringLiteral("seats")] = seats;
+        const AiBattleSettings migrated = AiBattleSettings::fromJson(legacy);
+        QCOMPARE(migrated.seats[1].strength, CloudStrength::Fast);
+        QCOMPARE(migrated.seats[1].timeoutSeconds, 10);
+        QCOMPARE(migrated.toJson().value("schemaVersion").toInt(), 2);
+
+        oldCloud[QStringLiteral("timeoutSeconds")] = 300;
+        seats[1] = oldCloud;
+        legacy[QStringLiteral("seats")] = seats;
+        QCOMPARE(AiBattleSettings::fromJson(legacy).seats[1].timeoutSeconds, 180);
+    }
+
+    void testAllComputerSeatsShareOneCloudModel() {
+        AiBattleSettings settings;
+        settings.playerCount = PLAYER_COUNT;
+        settings.seats[1].kind = SeatControllerKind::CloudAi;
+        settings.seats[1].credentialId = QStringLiteral("credential-a");
+        settings.seats[1].credentialName = QString::fromUtf8(u8"认证A");
+        settings.seats[1].model = QStringLiteral("shared-model");
+        settings.seats[1].strength = CloudStrength::Fast;
+        settings.seats[1].timeoutSeconds = 20;
+        // 旧配置里其余座位可能还是本地机器人或其他模型。
+        settings.seats[2].kind = SeatControllerKind::LocalAi;
+        settings.seats[3].kind = SeatControllerKind::CloudAi;
+        settings.seats[3].credentialId = QStringLiteral("credential-b");
+        settings.seats[3].model = QStringLiteral("other-model");
+        settings.normalize();
+
+        for (int index = 1; index < PLAYER_COUNT; ++index) {
+            const auto& seat = settings.seats[static_cast<std::size_t>(index)];
+            QCOMPARE(seat.kind, SeatControllerKind::CloudAi);
+            QCOMPARE(seat.credentialId, QStringLiteral("credential-a"));
+            QCOMPARE(seat.model, QStringLiteral("shared-model"));
+            QCOMPARE(seat.strength, CloudStrength::Fast);
+            QCOMPARE(seat.timeoutSeconds, 20);
+        }
+        QVERIFY(settings.hasCloudSeat());
+        QVERIFY(settings.validForStart(nullptr));
+        // 玩家一仍为真人，不参与云配置。
+        QCOMPARE(settings.seats[0].kind, SeatControllerKind::LocalAi);
+    }
+
+    void testCloudActionCatalogIsDeterministicBoundedAndEngineLegal() {
+        for (const int playerCount : {TWO_PLAYER_COUNT, THREE_PLAYER_COUNT, PLAYER_COUNT}) {
+            GameEngine engine;
+            GameCommand start;
+            start.type = GameCommandType::StartGame;
+            start.playerCount = playerCount;
+            start.randomSeed = 987600 + playerCount;
+            QVERIFY(engine.execute(start).success);
+            StandardAiPlayer ai(AiDifficulty::Advanced);
+            while (engine.state().phase() == GamePhase::Bidding) {
+                const auto player = engine.fullState().currentPlayer;
+                QVERIFY(engine.execute(ai.decideBid(engine.state(), player)).success);
+            }
+            QCOMPARE(engine.state().phase(), GamePhase::Playing);
+            const auto player = engine.fullState().currentPlayer;
+            SeatControllerConfig controller;
+            controller.kind = SeatControllerKind::CloudAi;
+            controller.credentialId = QStringLiteral("test");
+            controller.model = QStringLiteral("fake-model");
+            const auto first = AiActionCatalog::create(
+                engine.state(), player, controller, QStringLiteral("same-request"));
+            const auto second = AiActionCatalog::create(
+                engine.state(), player, controller, QStringLiteral("same-request"));
+            QVERIFY(!first.actions.isEmpty());
+            QVERIFY(first.actions.size() <= AI_MAX_ACTIONS);
+            QCOMPARE(QJsonDocument(first.toServiceJson()).toJson(QJsonDocument::Compact),
+                     QJsonDocument(second.toServiceJson()).toJson(QJsonDocument::Compact));
+            QVERIFY(QJsonDocument(first.toServiceJson()).toJson(QJsonDocument::Compact).size()
+                    <= AI_MAX_MESSAGE_BYTES);
+            QSet<QString> signatures;
+            for (const auto& action : first.actions) {
+                QVERIFY(!signatures.contains(action.semanticSignature));
+                signatures.insert(action.semanticSignature);
+                GameEngine verifier;
+                verifier.state() = engine.state();
+                QVERIFY2(verifier.execute(action.command).success,
+                         "Every catalog action must pass the real engine");
+            }
+        }
+    }
+
+    void testCloudResponseMustMatchWholeTurnContext() {
+        GameEngine engine;
+        GameCommand start;
+        start.type = GameCommandType::StartGame;
+        start.playerCount = THREE_PLAYER_COUNT;
+        start.randomSeed = 20260924;
+        QVERIFY(engine.execute(start).success);
+        const PlayerId player = engine.fullState().currentPlayer;
+        SeatControllerConfig controller;
+        controller.kind = SeatControllerKind::CloudAi;
+        controller.credentialId = QStringLiteral("test");
+        controller.model = QStringLiteral("fake-model");
+        const AiDecisionRequest request = AiActionCatalog::create(
+            engine.state(), player, controller, QStringLiteral("request-1"));
+        AiDecisionResponse response;
+        response.requestId = request.requestId;
+        response.gameId = request.gameId;
+        response.eventSequence = request.eventSequence;
+        response.phase = request.phase;
+        response.playerId = request.playerId;
+        QVERIFY(response.matches(request, engine.state()));
+
+        auto changed = response;
+        changed.gameId++;
+        QVERIFY(!changed.matches(request, engine.state()));
+        changed = response;
+        changed.eventSequence++;
+        QVERIFY(!changed.matches(request, engine.state()));
+        changed = response;
+        changed.playerId = PlayerId::Player4;
+        QVERIFY(!changed.matches(request, engine.state()));
+        const auto malformed = AiDecisionResponse::fromServiceJson({
+            {QStringLiteral("request_id"), request.requestId},
+            {QStringLiteral("game_id"), static_cast<qint64>(request.gameId)},
+            {QStringLiteral("event_sequence"), static_cast<qint64>(request.eventSequence)},
+            {QStringLiteral("phase"), QStringLiteral("unknown")},
+            {QStringLiteral("seat"), 999}});
+        QVERIFY(!malformed.matches(request, engine.state()));
+
+        const GameCommand legalBid = request.actions.back().command;
+        QVERIFY(engine.execute(legalBid).success);
+        QVERIFY(!response.matches(request, engine.state()));
+    }
+
+    void testLocalDecisionAdapterMatchesFrozenStandardAi() {
+        const std::array<int, 3> playerCounts{
+            TWO_PLAYER_COUNT, THREE_PLAYER_COUNT, PLAYER_COUNT};
+        const std::array<AiDifficulty, 3> difficulties{
+            AiDifficulty::Beginner, AiDifficulty::Intermediate, AiDifficulty::Advanced};
+        LocalAiDecisionAdapter adapter;
+        for (const int playerCount : playerCounts) {
+            for (const auto difficulty : difficulties) {
+                GameEngine engine;
+                GameCommand start;
+                start.type = GameCommandType::StartGame;
+                start.playerCount = playerCount;
+                start.randomSeed = 20260924 + playerCount * 10 + static_cast<int>(difficulty);
+                QVERIFY(engine.execute(start).success);
+
+                StandardAiPlayer direct(difficulty);
+                const auto biddingPlayer = engine.fullState().currentPlayer;
+                const auto bidObservation = makeAiObservation(engine.state(), biddingPlayer);
+                const auto directBid = direct.decideBid(bidObservation);
+                const auto adaptedBid = adapter.requestBid(bidObservation, difficulty);
+                QCOMPARE(adaptedBid.type, directBid.type);
+                QCOMPARE(adaptedBid.playerId, directBid.playerId);
+                QCOMPARE(adaptedBid.bidValue, directBid.bidValue);
+                QCOMPARE(adaptedBid.aiDecisionReason, directBid.aiDecisionReason);
+
+                for (int guard = 0; guard < 20 && engine.state().phase() == GamePhase::Bidding;
+                     ++guard) {
+                    const auto player = engine.fullState().currentPlayer;
+                    QVERIFY(engine.execute(direct.decideBid(engine.state(), player)).success);
+                }
+                QCOMPARE(engine.state().phase(), GamePhase::Playing);
+                const auto playingPlayer = engine.fullState().currentPlayer;
+                const auto playObservation = makeAiObservation(engine.state(), playingPlayer);
+                const auto directPlay = direct.decidePlay(playObservation);
+                const auto adaptedPlay = adapter.requestPlay(playObservation, difficulty);
+                QCOMPARE(adaptedPlay.type, directPlay.type);
+                QCOMPARE(adaptedPlay.playerId, directPlay.playerId);
+                QCOMPARE(adaptedPlay.cardIds, directPlay.cardIds);
+                QCOMPARE(adaptedPlay.aiDecisionReason, directPlay.aiDecisionReason);
+                QCOMPARE(adaptedPlay.aiTeamRuleException, directPlay.aiTeamRuleException);
+            }
+        }
+    }
+
     void testAiBidReturnsValidCommand() {
         GameEngine engine;
         GameCommand start;
@@ -117,6 +336,26 @@ private slots:
         hand.addCards(sameRankCards(Rank::Three, 5));
         const auto freeMoves = LegalMoveGenerator::generateLegalMoves(hand);
         QVERIFY(containsResponse(freeMoves, CardPatternType::KingBomb, Rank::BigJoker));
+    }
+
+    void testFourPlayerGeneratorExcludesOverlappingAirplaneWings() {
+        Hand hand;
+        hand.addCards(sameRankCards(Rank::Three, 5));
+        hand.addCards(sameRankCards(Rank::Four, 3));
+        hand.addCards(sameRankCards(Rank::Five, 2));
+        const auto moves = LegalMoveGenerator::generateLegalMoves(
+            hand, std::nullopt, PLAYER_COUNT);
+        QVERIFY(!containsResponse(moves, CardPatternType::AirplaneWithPairs, Rank::Three));
+
+        hand.addCards(sameRankCards(Rank::Six, 2));
+        const auto validMoves = LegalMoveGenerator::generateLegalMoves(
+            hand, std::nullopt, PLAYER_COUNT);
+        QVERIFY(containsResponse(validMoves, CardPatternType::AirplaneWithPairs, Rank::Three));
+        for (const auto& move : validMoves) {
+            if (move.pattern.type != CardPatternType::AirplaneWithPairs) continue;
+            QCOMPARE(PatternAnalyzer::analyze(move.cards, PLAYER_COUNT).type,
+                     CardPatternType::AirplaneWithPairs);
+        }
     }
 
     void testSingleDeckGeneratorsAddStandardAttachmentsOnlyForSingleDeckModes() {

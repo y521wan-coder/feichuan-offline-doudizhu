@@ -29,7 +29,7 @@ private:
     static std::optional<CardPattern> analyzeConsecutivePairs(const std::vector<Card>& cards, const RankHistogram& hist);
     static std::optional<CardPattern> analyzeAirplane(const std::vector<Card>& cards, const RankHistogram& hist);
     static std::optional<CardPattern> analyzeAirplaneWithSingles(const std::vector<Card>& cards, const RankHistogram& hist);
-    static std::optional<CardPattern> analyzeAirplaneWithPairs(const std::vector<Card>& cards, const RankHistogram& hist);
+    static std::optional<CardPattern> analyzeAirplaneWithPairs(const std::vector<Card>& cards, const RankHistogram& hist, int activePlayerCount);
     static std::optional<CardPattern> analyzeFourWithTwoSingles(const std::vector<Card>& cards, const RankHistogram& hist);
     static std::optional<CardPattern> analyzeFourWithTwoPairs(const std::vector<Card>& cards, const RankHistogram& hist);
     static std::optional<CardPattern> analyzeBombs(const std::vector<Card>& cards, const RankHistogram& hist);

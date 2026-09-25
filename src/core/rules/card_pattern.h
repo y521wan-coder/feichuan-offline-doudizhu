@@ -32,7 +32,7 @@ enum class CardPatternType {
 bool isBombType(CardPatternType type);
 int bombMultiplier(CardPatternType type);
 int bombLevel(CardPatternType type); // For comparison: higher = stronger bomb
-std::wstring patternTypeName(CardPatternType type);
+std::wstring patternTypeName(CardPatternType type, int activePlayerCount = 3);
 
 struct CardPattern {
     CardPatternType type = CardPatternType::Invalid;

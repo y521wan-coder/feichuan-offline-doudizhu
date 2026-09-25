@@ -175,6 +175,7 @@ std::vector<LegalMove> LegalMoveGenerator::generateLegalMoves(
 
             std::vector<Rank> wingRanks;
             for (const auto rank : pairRanks) {
+                if (activePlayerCount == PLAYER_COUNT && bodyRanks.contains(rank)) continue;
                 const int requiredCards = bodyRanks.contains(rank) ? 5 : 2;
                 if (static_cast<int>(groups.at(rank).size()) >= requiredCards) {
                     wingRanks.push_back(rank);

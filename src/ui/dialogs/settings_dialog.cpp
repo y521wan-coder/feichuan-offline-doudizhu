@@ -37,6 +37,13 @@ SettingsDialog::SettingsDialog(const AppSettings& settings, QWidget* parent)
     m_autoPassSeconds->setValue(settings.autoPassSeconds);
     form->addRow(QString::fromStdWString(L"等待时间"), m_autoPassSeconds);
 
+    m_landlordMustLeadFirstTurn = new QCheckBox(
+        QString::fromUtf8(u8"地主首轮必须出牌（不可过牌）"), this);
+    m_landlordMustLeadFirstTurn->setObjectName(
+        QStringLiteral("landlordMustLeadFirstTurnCheckBox"));
+    m_landlordMustLeadFirstTurn->setChecked(settings.landlordMustLeadFirstTurn);
+    form->addRow(QString::fromUtf8(u8"地主首轮"), m_landlordMustLeadFirstTurn);
+
     m_aiDifficulty = new QComboBox(this);
     m_aiDifficulty->setObjectName(QStringLiteral("aiModeComboBox"));
     m_aiDifficulty->addItem(QString::fromStdWString(L"初级"), static_cast<int>(AiDifficulty::Beginner));
@@ -111,6 +118,7 @@ AppSettings SettingsDialog::settings() const {
     settings.playerCount = m_playerCount->currentData().toInt();
     settings.autoPassEnabled = m_autoPassEnabled->isChecked();
     settings.autoPassSeconds = m_autoPassSeconds->value();
+    settings.landlordMustLeadFirstTurn = m_landlordMustLeadFirstTurn->isChecked();
     const int selectedMode = m_aiDifficulty->currentData().toInt();
     settings.soundEnabled = m_soundEnabled->isChecked();
     settings.soundVolume = m_soundVolume->value();

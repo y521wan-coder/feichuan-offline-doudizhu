@@ -43,7 +43,7 @@ int bombLevel(CardPatternType type) {
     }
 }
 
-std::wstring patternTypeName(CardPatternType type) {
+std::wstring patternTypeName(CardPatternType type, int activePlayerCount) {
     switch (type) {
         case CardPatternType::Single:             return L"单张";
         case CardPatternType::Pair:               return L"对子";
@@ -58,12 +58,12 @@ std::wstring patternTypeName(CardPatternType type) {
         case CardPatternType::FourWithTwoSingles: return L"四带二单";
         case CardPatternType::FourWithTwoPairs:   return L"四带两对";
         case CardPatternType::Gun:                return L"枪";
-        case CardPatternType::KingBomb:           return L"王炸";
+        case CardPatternType::KingBomb:           return activePlayerCount == 4 ? L"双王枪毙" : L"王炸";
         case CardPatternType::Cannon:             return L"炮";
         case CardPatternType::Rocket:             return L"火箭";
         case CardPatternType::Missile:            return L"导弹";
         case CardPatternType::SkyBlast:           return L"天炸";
-        case CardPatternType::HeavenlyLord:       return L"天尊";
+        case CardPatternType::HeavenlyLord:       return activePlayerCount == 4 ? L"天尊无敌" : L"天尊";
         case CardPatternType::Invalid:            return L"无效";
     }
     return L"未知";

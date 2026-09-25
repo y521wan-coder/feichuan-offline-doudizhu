@@ -26,6 +26,16 @@ QString defaultPlayerName(int index) {
     return QString::fromStdWString(playerIdDisplayName(static_cast<PlayerId>(index)));
 }
 
+QString legacyDefaultPlayerName(int index) {
+    switch (index) {
+    case 0: return QString::fromUtf8(u8"玩家一");
+    case 1: return QString::fromUtf8(u8"玩家二");
+    case 2: return QString::fromUtf8(u8"玩家三");
+    case 3: return QString::fromUtf8(u8"玩家四");
+    default: return {};
+    }
+}
+
 const char* soundCategoryKey(SoundCategory category) {
     switch (category) {
     case SoundCategory::StartupDeal: return "startupDeal";
@@ -64,6 +74,10 @@ void AppSettings::normalize() {
     shortcuts.normalize();
     for (int i = 0; i < PLAYER_COUNT; ++i) {
         playerNames[static_cast<size_t>(i)] = playerNames[static_cast<size_t>(i)].trimmed();
+        // 旧版本把默认名称存成“玩家一”等；这不是用户自定义名称，统一迁移为 1/2/3/4。
+        if (playerNames[static_cast<size_t>(i)] == legacyDefaultPlayerName(i)) {
+            playerNames[static_cast<size_t>(i)].clear();
+        }
         if (playerNames[static_cast<size_t>(i)].isEmpty()) {
             playerNames[static_cast<size_t>(i)] = defaultPlayerName(i);
         }
@@ -111,6 +125,7 @@ QJsonObject AppSettings::toJson() const {
     json["animationEnabled"] = normalized.animationEnabled;
     json["autoPassEnabled"] = normalized.autoPassEnabled;
     json["autoPassSeconds"] = normalized.autoPassSeconds;
+    json["landlordMustLeadFirstTurn"] = normalized.landlordMustLeadFirstTurn;
     json["automaticUpdateChecks"] = normalized.automaticUpdateChecks;
     json["lastAutomaticUpdateCheckDate"] = normalized.lastAutomaticUpdateCheckDate;
     json["ignoredUpdateVersion"] = normalized.ignoredUpdateVersion;
@@ -161,6 +176,8 @@ AppSettings AppSettings::fromJson(const QJsonObject& json) {
     settings.animationEnabled = jsonBool(json, "animationEnabled", settings.animationEnabled);
     settings.autoPassEnabled = jsonBool(json, "autoPassEnabled", settings.autoPassEnabled);
     settings.autoPassSeconds = jsonInt(json, "autoPassSeconds", settings.autoPassSeconds);
+    settings.landlordMustLeadFirstTurn = jsonBool(
+        json, "landlordMustLeadFirstTurn", settings.landlordMustLeadFirstTurn);
     settings.automaticUpdateChecks = jsonBool(
         json, "automaticUpdateChecks", settings.automaticUpdateChecks);
     settings.lastAutomaticUpdateCheckDate = jsonString(json, "lastAutomaticUpdateCheckDate");

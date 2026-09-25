@@ -340,7 +340,7 @@ CommandResult GameEngine::handlePlayCards(const GameCommand& cmd) {
     evt.pattern = pattern;
     evt.remainingCards = player.hand.size();
     evt.message = playerIdDisplayName(cmd.playerId) + L"出了" +
-                  patternTypeName(pattern.type) + L"，" +
+                  patternTypeName(pattern.type, fs.activePlayerCount) + L"，" +
                   std::to_wstring(playedCards.size()) + L"张牌";
     result.events.push_back(evt);
     fs.actionHistory.push_back(PublicActionRecord{

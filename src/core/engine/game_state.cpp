@@ -5,20 +5,20 @@ namespace fpdz {
 
 GameState::GameState() {
     m_fullState.players[0].id = PlayerId::Player1;
-    m_fullState.players[0].name = L"玩家一";
+    m_fullState.players[0].name = L"1";
     m_fullState.players[0].seat = SeatPosition::East;
     m_fullState.players[0].isHuman = true;
 
     m_fullState.players[1].id = PlayerId::Player2;
-    m_fullState.players[1].name = L"玩家二";
+    m_fullState.players[1].name = L"2";
     m_fullState.players[1].seat = SeatPosition::South;
 
     m_fullState.players[2].id = PlayerId::Player3;
-    m_fullState.players[2].name = L"玩家三";
+    m_fullState.players[2].name = L"3";
     m_fullState.players[2].seat = SeatPosition::West;
 
     m_fullState.players[3].id = PlayerId::Player4;
-    m_fullState.players[3].name = L"玩家四";
+    m_fullState.players[3].name = L"4";
     m_fullState.players[3].seat = SeatPosition::North;
 }
 

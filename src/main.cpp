@@ -1,6 +1,6 @@
 ﻿#include "app/application.h"
 #include "app/service_registry.h"
-#include "ui/main_window.h"
+#include "app/startup_controller.h"
 #include <QStyleFactory>
 
 int main(int argc, char* argv[]) {
@@ -10,10 +10,8 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    auto window = fpdz::createMainWindow(app.services().gameEngine(),
-                                         app.services().accessibility(),
-                                         &app.services().diagnosticTrace());
-    window->show();
+    fpdz::StartupController startup(app.services());
+    startup.showModeSelection();
 
     return app.exec();
 }

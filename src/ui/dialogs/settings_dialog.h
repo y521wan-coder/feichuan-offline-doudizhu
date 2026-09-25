@@ -20,6 +20,7 @@ private:
     QComboBox* m_playerCount = nullptr;
     QCheckBox* m_autoPassEnabled = nullptr;
     QSpinBox* m_autoPassSeconds = nullptr;
+    QCheckBox* m_landlordMustLeadFirstTurn = nullptr;
     QComboBox* m_aiDifficulty = nullptr;
     QCheckBox* m_soundEnabled = nullptr;
     QSpinBox* m_soundVolume = nullptr;

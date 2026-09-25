@@ -2,6 +2,7 @@
 #include <QtTest/QTestAccessibility>
 #include <QMenu>
 #include <QComboBox>
+#include <QCheckBox>
 #include <QLineEdit>
 #include <QApplication>
 #include <QClipboard>
@@ -22,6 +23,7 @@
 #include <QTimer>
 #include <QAction>
 #include <QPushButton>
+#include <QPlainTextEdit>
 #include <QMessageBox>
 #include <QAbstractButton>
 #include <QRegularExpression>
@@ -39,11 +41,13 @@
 #include <vector>
 
 #include "accessibility/accessibility_service.h"
+#include "app/ai_service_client.h"
 #include "core/audio/card_pattern_sound_plan.h"
 #include "core/engine/game_engine.h"
 #include "core/model/card.h"
 #include "core/rules/pattern_analyzer.h"
 #include "ui/main_window.h"
+#include "ui/mode_selection_window.h"
 #include "ui/dialogs/settings_dialog.h"
 #include "ui/dialogs/shortcut_dialog.h"
 #include "ui/models/hand_list_model.h"
@@ -51,6 +55,7 @@
 #include "ui/sound_service.h"
 #include "persistence/diagnostic_trace_service.h"
 #include "persistence/data_paths.h"
+#include "persistence/ai_battle_statistics_repository.h"
 #include "persistence/settings_repository.h"
 
 using namespace fpdz;
@@ -67,10 +72,196 @@ private slots:
         QDir(DataPaths::appDataDir()).removeRecursively();
     }
 
+    void testModeSelectionDefaultsToOfflineAndCyclesWithTab() {
+        ModeSelectionWindow window;
+        window.show();
+        QVERIFY(QTest::qWaitForWindowActive(&window));
+
+        auto* offline = window.offlineButton();
+        auto* aiBattle = window.aiBattleButton();
+        QVERIFY(offline);
+        QVERIFY(aiBattle);
+        QTRY_VERIFY(offline->hasFocus());
+        QVERIFY(offline->accessibleName().startsWith(
+            QString::fromUtf8(u8"纯单机版模式，第一项，共两项")));
+        QVERIFY(offline->accessibleDescription().contains(QString::fromUtf8(u8"不会启动AI服务")));
+
+        QTestAccessibility::initialize();
+        QTestAccessibility::clearEvents();
+        QTest::keyClick(offline, Qt::Key_Tab);
+        QTRY_VERIFY(aiBattle->hasFocus());
+        int aiBattleFocusEvents = 0;
+        int explicitAnnouncements = 0;
+        for (const QAccessibleEvent* event : QTestAccessibility::events()) {
+            if (event->object() != aiBattle) continue;
+            if (event->type() == QAccessible::Focus) ++aiBattleFocusEvents;
+            if (event->type() == QAccessible::Announcement) ++explicitAnnouncements;
+        }
+        QCOMPARE(aiBattleFocusEvents, 1);
+        QCOMPARE(explicitAnnouncements, 0);
+        QTestAccessibility::cleanup();
+        QTest::keyClick(aiBattle, Qt::Key_Tab);
+        QTRY_VERIFY(offline->hasFocus());
+        QTest::keyClick(offline, Qt::Key_Tab, Qt::ShiftModifier);
+        QTRY_VERIFY(aiBattle->hasFocus());
+    }
+
+    void testModeSelectionEnterActivatesFocusedMode() {
+        ModeSelectionWindow window;
+        QSignalSpy selected(&window, &ModeSelectionWindow::modeSelected);
+        window.show();
+        QVERIFY(QTest::qWaitForWindowActive(&window));
+        QTRY_VERIFY(window.offlineButton()->hasFocus());
+
+        QTest::keyClick(window.offlineButton(), Qt::Key_Return);
+        QCOMPARE(selected.count(), 1);
+        QCOMPARE(qvariant_cast<GameMode>(selected.takeFirst().at(0)), GameMode::Offline);
+
+        window.aiBattleButton()->setFocus();
+        QTest::keyClick(window.aiBattleButton(), Qt::Key_Return);
+        QCOMPARE(selected.count(), 1);
+        QCOMPARE(qvariant_cast<GameMode>(selected.takeFirst().at(0)), GameMode::AiBattle);
+    }
+
+    void testOfflineWindowNeverCreatesAiServiceClient() {
+        GameEngine engine;
+        AccessibilityService accessibility;
+        MainWindow window(engine, accessibility, nullptr, GameMode::Offline);
+        QVERIFY(window.findChildren<AiServiceClient*>().isEmpty());
+        QVERIFY(!window.findChild<QAction*>(QStringLiteral("copyAiBattleGamesAction")));
+    }
+
+    void testAiBattleF5OpensAiBattleSettings() {
+        GameEngine engine;
+        AccessibilityService accessibility;
+        MainWindow window(engine, accessibility, nullptr, GameMode::AiBattle);
+        window.show();
+        QVERIFY(QTest::qWaitForWindowActive(&window));
+
+        bool sawAiBattleSettings = false;
+        bool sawSharedCloudModel = false;
+        bool sawLegacyPerSeatModel = false;
+        bool sawTimeoutCombo = false;
+        bool sawHumanWait = false;
+        bool sawLandlordLeadSwitch = false;
+        bool sawNoStrengthCombo = false;
+        bool sawStrategyPrompt = false;
+        QTimer closeSettingsDialog;
+        closeSettingsDialog.setInterval(20);
+        connect(&closeSettingsDialog, &QTimer::timeout, [&]() {
+            auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
+            if (!dialog) return;
+            sawAiBattleSettings = dialog->findChild<QComboBox*>(
+                QStringLiteral("aiBattlePlayerCountCombo")) != nullptr;
+            sawSharedCloudModel = dialog->findChild<QComboBox*>(
+                QStringLiteral("aiBattleSharedModelCombo")) != nullptr;
+            sawLegacyPerSeatModel = dialog->findChild<QComboBox*>(
+                QStringLiteral("aiBattleSeat2Model")) != nullptr;
+            sawNoStrengthCombo = dialog->findChild<QComboBox*>(
+                QStringLiteral("aiBattleSharedStrengthCombo")) == nullptr;
+            auto* timeout = dialog->findChild<QComboBox*>(
+                QStringLiteral("aiBattleSharedTimeoutCombo"));
+            sawTimeoutCombo = timeout && timeout->isEditable() &&
+                timeout->findData(10) >= 0 && timeout->findData(180) >= 0;
+            auto* autoPass = dialog->findChild<QCheckBox*>(
+                QStringLiteral("aiBattleAutoPassEnabledCheckBox"));
+            auto* humanWait = dialog->findChild<QSpinBox*>(
+                QStringLiteral("aiBattleAutoPassSecondsSpinBox"));
+            sawHumanWait = autoPass && humanWait && humanWait->minimum() == 3 &&
+                humanWait->maximum() == 1800 && humanWait->singleStep() == 1;
+            auto* landlordLead = dialog->findChild<QCheckBox*>(
+                QStringLiteral("aiBattleLandlordMustLeadFirstTurnCheckBox"));
+            sawLandlordLeadSwitch = landlordLead && landlordLead->isChecked();
+            if (humanWait) {
+                humanWait->setValue(1799);
+                QTest::keyClick(humanWait, Qt::Key_Up);
+                QCOMPARE(humanWait->value(), 1800);
+                QTest::keyClick(humanWait, Qt::Key_Up);
+                QCOMPARE(humanWait->value(), 1800);
+                QTest::keyClick(humanWait, Qt::Key_Down);
+                QCOMPARE(humanWait->value(), 1799);
+            }
+            auto* prompt = dialog->findChild<QPlainTextEdit*>(
+                QStringLiteral("aiBattleStrategyPromptEdit"));
+            sawStrategyPrompt = prompt && prompt->toPlainText().contains(
+                QString::fromUtf8(u8"农民通常不压队友")) &&
+                dialog->findChild<QPushButton*>(
+                    QStringLiteral("resetAiBattleStrategyPromptButton"));
+            if (prompt) {
+                prompt->setPlainText(QString::fromUtf8(u8"测试自定义策略"));
+                auto* reset = dialog->findChild<QPushButton*>(
+                    QStringLiteral("resetAiBattleStrategyPromptButton"));
+                if (reset) {
+                    reset->click();
+                    QVERIFY(prompt->toPlainText().contains(
+                        QString::fromUtf8(u8"农民通常不压队友")));
+                    dialog->activateWindow();
+                    prompt->setFocus(Qt::OtherFocusReason);
+                    QTRY_VERIFY(prompt->hasFocus());
+                    const QString beforeTyping = prompt->toPlainText();
+                    QTest::keyClicks(prompt, QStringLiteral("x"));
+                    QVERIFY(prompt->toPlainText() != beforeTyping);
+                    const QString promptText = prompt->toPlainText();
+                    QTest::keyClick(prompt, Qt::Key_Tab);
+                    QCOMPARE(prompt->toPlainText(), promptText);
+                    QVERIFY(reset->hasFocus());
+                    QTest::keyClick(reset, Qt::Key_Tab, Qt::ShiftModifier);
+                    QVERIFY(prompt->hasFocus());
+                    QTest::keyClick(prompt, Qt::Key_Tab, Qt::ShiftModifier);
+                    QVERIFY(!prompt->hasFocus());
+                    QCOMPARE(prompt->toPlainText(), promptText);
+                }
+            }
+            if (timeout) {
+                timeout->setCurrentText(QStringLiteral("17"));
+                QCOMPARE(timeout->currentText(), QStringLiteral("17"));
+            }
+            closeSettingsDialog.stop();
+            dialog->reject();
+        });
+        closeSettingsDialog.start();
+
+        QTest::keyClick(&window, Qt::Key_F5);
+        QVERIFY(sawAiBattleSettings);
+        QVERIFY(sawSharedCloudModel);
+        QVERIFY(!sawLegacyPerSeatModel);
+        QVERIFY(sawNoStrengthCombo);
+        QVERIFY(sawTimeoutCombo);
+        QVERIFY(sawHumanWait);
+        QVERIFY(sawLandlordLeadSwitch);
+        QVERIFY(sawStrategyPrompt);
+        auto* copyGames = window.findChild<QAction*>(
+            QStringLiteral("copyAiBattleGamesAction"));
+        QVERIFY(copyGames);
+        AiBattleStatisticsRepository repository;
+        FullGameState completed;
+        completed.gameId = 999;
+        completed.activePlayerCount = TWO_PLAYER_COUNT;
+        completed.players[0].role = Role::Landlord;
+        RoundResult result;
+        result.valid = true;
+        AiBattleSettings battleSettings;
+        battleSettings.playerCount = TWO_PLAYER_COUNT;
+        QVERIFY(repository.saveDetailedGame(
+            DataPaths::aiBattleReplaysDir() + QStringLiteral("/detailed"),
+            result, completed, battleSettings));
+        copyGames->trigger();
+        const QJsonArray copiedGames = QJsonDocument::fromJson(
+            QApplication::clipboard()->text().toUtf8()).array();
+        QCOMPARE(copiedGames.size(), 1);
+        QCOMPARE(copiedGames.first().toObject().value("gameId").toInt(), 999);
+    }
+
     void testSettingsExposeExactlyThreeLocalRobotModes() {
         AppSettings settings;
         settings.aiDifficulty = static_cast<int>(AiDifficulty::Advanced);
         SettingsDialog dialog(settings);
+        auto* landlordLead = dialog.findChild<QCheckBox*>(
+            QStringLiteral("landlordMustLeadFirstTurnCheckBox"));
+        QVERIFY(landlordLead);
+        QVERIFY(landlordLead->isChecked());
+        landlordLead->setChecked(false);
+        QVERIFY(!dialog.settings().landlordMustLeadFirstTurn);
 
         auto* combo = dialog.findChild<QComboBox*>(QStringLiteral("aiModeComboBox"));
         QVERIFY(combo);
@@ -322,6 +513,90 @@ private slots:
         QCOMPARE(spinBox->maximum(), 1800);
         QCOMPARE(spinBox->singleStep(), 1);
         QVERIFY(spinBox->isAccelerated());
+    }
+
+    void testLandlordFirstTurnPassSwitchAndNormalResponse() {
+        auto saveOfflineSetting = [](bool mustLead) {
+            AppSettings settings;
+            settings.landlordMustLeadFirstTurn = mustLead;
+            SettingsRepository repository;
+            repository.setData(settings.toJson());
+            DataPaths::ensureDirectories();
+            return repository.save(DataPaths::settingsFile());
+        };
+        auto passButton = [](MainWindow& window) -> QPushButton* {
+            for (auto* button : window.findChildren<QPushButton*>()) {
+                if (button->accessibleName() == QString::fromUtf8(u8"过牌")) return button;
+            }
+            return nullptr;
+        };
+        auto countdownLabel = [](MainWindow& window) -> QLabel* {
+            for (auto* label : window.findChildren<QLabel*>()) {
+                if (label->accessibleName() == QString::fromUtf8(u8"本轮操作剩余时间")) {
+                    return label;
+                }
+            }
+            return nullptr;
+        };
+
+        QVERIFY(saveOfflineSetting(true));
+        {
+            GameEngine engine;
+            preparePlayingHand(engine, handOfCounts({{Rank::Three, 2}}));
+            engine.state().fullState().actionHistory.push_back(
+                {PublicActionType::Bid, PlayerId::Player1, 3, {}, 1});
+            AccessibilityService accessibility;
+            MainWindow window(engine, accessibility);
+            window.show();
+            QVERIFY(QTest::qWaitForWindowActive(&window));
+            window.refreshFromState();
+            QVERIFY(passButton(window));
+            QVERIFY(!passButton(window)->isEnabled());
+            QVERIFY(countdownLabel(window));
+            QVERIFY(!countdownLabel(window)->isVisible());
+            QTest::keyClick(&window, Qt::Key_Return, Qt::ControlModifier);
+            QCOMPARE(engine.fullState().currentPlayer, PlayerId::Player1);
+            QCOMPARE(engine.fullState().actionHistory.size(), std::size_t(1));
+        }
+
+        QVERIFY(saveOfflineSetting(false));
+        {
+            GameEngine engine;
+            preparePlayingHand(engine, handOfCounts({{Rank::Three, 2}}));
+            AccessibilityService accessibility;
+            MainWindow window(engine, accessibility);
+            window.show();
+            QVERIFY(QTest::qWaitForWindowActive(&window));
+            window.refreshFromState();
+            QVERIFY(passButton(window));
+            QVERIFY(passButton(window)->isEnabled());
+            QTest::keyClick(&window, Qt::Key_Return, Qt::ControlModifier);
+            QCOMPARE(engine.fullState().actionHistory.size(), std::size_t(1));
+            QCOMPARE(engine.fullState().actionHistory.back().type, PublicActionType::Pass);
+            QCOMPARE(engine.fullState().currentPlayer, PlayerId::Player2);
+        }
+
+        QVERIFY(saveOfflineSetting(true));
+        {
+            GameEngine engine;
+            preparePlayingHand(engine, handOfCounts({{Rank::Three, 2}}));
+            auto& state = engine.state().fullState();
+            const Card previousCard = Card::create(Rank::Four, Suit::Spades, 0);
+            state.lastPlayedCards = {previousCard};
+            state.lastPlayedBy = PlayerId::Player2;
+            state.actionHistory.push_back(
+                {PublicActionType::Play, PlayerId::Player2, 0, {previousCard}, 1});
+            AccessibilityService accessibility;
+            MainWindow window(engine, accessibility);
+            window.show();
+            QVERIFY(QTest::qWaitForWindowActive(&window));
+            window.refreshFromState();
+            QVERIFY(passButton(window));
+            QVERIFY(passButton(window)->isEnabled());
+            QTest::keyClick(&window, Qt::Key_Return, Qt::ControlModifier);
+            QCOMPARE(state.actionHistory.back().type, PublicActionType::Pass);
+            QCOMPARE(state.currentPlayer, PlayerId::Player2);
+        }
     }
 
     void testSettingsAudioValuesApplyOnlyAfterAccepted() {
@@ -1076,6 +1351,10 @@ private slots:
             QCOMPARE(list->count(), static_cast<int>(ShortcutSettings::ActionCount));
             QVERIFY(list->item(static_cast<int>(ShortcutAction::LastAction))
                         ->text().contains(QStringLiteral("F12")));
+            QVERIFY(list->item(static_cast<int>(ShortcutAction::PreviousWholeRankGroup))
+                        ->text().contains(QString::fromUtf8(u8"Control加左光标键")));
+            QVERIFY(list->item(static_cast<int>(ShortcutAction::NextWholeRankGroup))
+                        ->text().contains(QString::fromUtf8(u8"Control加右光标键")));
             QVERIFY(list->accessibleName().contains(QString::fromUtf8(u8"快捷键")));
             auto* ok = dialog->findChild<QPushButton*>(
                 QStringLiteral("saveShortcutSettingsButton"));
@@ -1616,6 +1895,119 @@ private slots:
 #endif
     }
 
+    void testWholeRankGroupBrowseAndRemapping() {
+        HandListModel allGroupSizes;
+        QVERIFY(allGroupSizes.setCards(handOfCounts({
+            {Rank::Three, 1}, {Rank::Four, 2}, {Rank::Five, 3},
+            {Rank::Six, 4}, {Rank::Seven, 5}, {Rank::Eight, 6},
+            {Rank::Nine, 7}, {Rank::Ten, 8}, {Rank::Jack, 1}})));
+        int groupRow = 0;
+        const int expectedRows[] = {1, 3, 6, 10, 15, 21, 28};
+        const QString expectedSpeech[] = {
+            QString::fromUtf8(u8"对4"), QString::fromUtf8(u8"3张5"),
+            QString::fromUtf8(u8"4张6"), QString::fromUtf8(u8"5张7"),
+            QString::fromUtf8(u8"6张8"), QString::fromUtf8(u8"7张9"),
+            QString::fromUtf8(u8"8张10")};
+        for (int index = 0; index < 7; ++index) {
+            groupRow = allGroupSizes.nextBrowsableMultiCardGroupStartRow(groupRow);
+            QCOMPARE(groupRow, expectedRows[index]);
+            QCOMPARE(allGroupSizes.data(allGroupSizes.index(groupRow, 0),
+                                        Qt::AccessibleTextRole).toString(), expectedSpeech[index]);
+        }
+        QCOMPARE(allGroupSizes.nextBrowsableMultiCardGroupStartRow(groupRow), groupRow);
+        QCOMPARE(allGroupSizes.previousBrowsableMultiCardGroupStartRow(36), 28);
+        QCOMPARE(allGroupSizes.previousBrowsableMultiCardGroupStartRow(0), -1);
+        QCOMPARE(allGroupSizes.nextBrowsableMultiCardGroupStartRow(36), -1);
+        allGroupSizes.setSelected(28, true);
+        QCOMPARE(allGroupSizes.unselectedCountOfRank(Rank::Ten), 7);
+        QCOMPARE(allGroupSizes.nextBrowsableMultiCardGroupStartRow(21), 29);
+        for (int row = 29; row <= 34; ++row) allGroupSizes.setSelected(row, true);
+        QCOMPARE(allGroupSizes.unselectedCountOfRank(Rank::Ten), 1);
+        QCOMPARE(allGroupSizes.nextBrowsableMultiCardGroupStartRow(21), 21);
+
+        ShortcutSettings shortcuts;
+        QCOMPARE(shortcuts.actionFor({Qt::Key_Left, Qt::ControlModifier}),
+                 std::optional<ShortcutAction>(ShortcutAction::PreviousWholeRankGroup));
+        QCOMPARE(shortcuts.actionFor({Qt::Key_Right, Qt::ControlModifier}),
+                 std::optional<ShortcutAction>(ShortcutAction::NextWholeRankGroup));
+        shortcuts.setBinding(ShortcutAction::NextWholeRankGroup,
+                             {Qt::Key_PageDown, Qt::ControlModifier});
+        QCOMPARE(shortcuts.actionFor({Qt::Key_PageDown, Qt::ControlModifier}),
+                 std::optional<ShortcutAction>(ShortcutAction::NextWholeRankGroup));
+        QVERIFY(!shortcuts.actionFor({Qt::Key_Right, Qt::ControlModifier}));
+        const auto restored = ShortcutSettings::fromJson(shortcuts.toJson());
+        QCOMPARE(restored.binding(ShortcutAction::NextWholeRankGroup),
+                 (ShortcutBinding{Qt::Key_PageDown, Qt::ControlModifier}));
+
+        AppSettings defaults;
+        SettingsRepository repository;
+        repository.setData(defaults.toJson());
+        DataPaths::ensureDirectories();
+        QVERIFY(repository.save(DataPaths::settingsFile()));
+
+        GameEngine engine;
+        preparePlayingHand(engine, handOfCounts({
+            {Rank::Three, 1}, {Rank::Four, 2}, {Rank::Five, 1},
+            {Rank::Six, 3}, {Rank::Seven, 1}, {Rank::Eight, 4},
+            {Rank::Nine, 1}}));
+        AccessibilityService accessibility;
+        MainWindow window(engine, accessibility);
+        window.show();
+        QVERIFY(QTest::qWaitForWindowActive(&window));
+        window.refreshFromState();
+
+        auto* handView = window.findChild<QListView*>();
+        QVERIFY(handView);
+        auto* handModel = qobject_cast<HandListModel*>(handView->model());
+        QVERIFY(handModel);
+        auto* statusLabel = window.statusBar()->findChild<QLabel*>();
+        QVERIFY(statusLabel);
+        QTest::keyClick(&window, Qt::Key_Home);
+        QCOMPARE(handView->currentIndex().row(), 0);
+        QTest::keyClick(&window, Qt::Key_Right, Qt::ControlModifier);
+        QCOMPARE(handView->currentIndex().row(), 1);
+        QCOMPARE(statusLabel->accessibleName(), QString::fromUtf8(u8"对4"));
+        QTest::keyClick(&window, Qt::Key_Right, Qt::ControlModifier);
+        QCOMPARE(handView->currentIndex().row(), 4);
+        QCOMPARE(statusLabel->accessibleName(), QString::fromUtf8(u8"3张6"));
+        QTest::keyClick(&window, Qt::Key_Left, Qt::ControlModifier);
+        QCOMPARE(handView->currentIndex().row(), 1);
+        QTest::keyClick(&window, Qt::Key_Right);
+        QCOMPARE(handView->currentIndex().row(), 3);
+        QTest::keyClick(&window, Qt::Key_Right, Qt::ControlModifier);
+        QCOMPARE(handView->currentIndex().row(), 4);
+        QTest::keyClick(&window, Qt::Key_Up, Qt::ControlModifier);
+        QCOMPARE(handModel->selectedCount(), 3);
+        QTest::keyClick(&window, Qt::Key_Right, Qt::ControlModifier);
+        QCOMPARE(handView->currentIndex().row(), 8);
+        QCOMPARE(statusLabel->accessibleName(), QString::fromUtf8(u8"4张8"));
+        QTest::keyClick(&window, Qt::Key_Left, Qt::ControlModifier);
+        QCOMPARE(handView->currentIndex().row(), 1);
+        QCOMPARE(statusLabel->accessibleName(), QString::fromUtf8(u8"对4"));
+
+        handModel->setSelected(8, true);
+        QCOMPARE(handModel->unselectedCountOfRank(Rank::Eight), 3);
+        QCOMPARE(handModel->nextBrowsableMultiCardGroupStartRow(4), 9);
+        QCOMPARE(handModel->data(handModel->index(9, 0), Qt::AccessibleTextRole).toString(),
+                 QString::fromUtf8(u8"3张8"));
+        handModel->setSelected(9, true);
+        handModel->setSelected(10, true);
+        QCOMPARE(handModel->nextBrowsableMultiCardGroupStartRow(4), -1);
+        handModel->setSelected(8, false);
+        handModel->setSelected(9, false);
+        handModel->setSelected(10, false);
+
+#ifdef Q_OS_WIN
+        constexpr UINT keyboardHookMessage = WM_APP + 0x4F;
+        constexpr LPARAM ctrlFlag = 0x01;
+        const HWND windowHandle = reinterpret_cast<HWND>(window.winId());
+        QVERIFY(PostMessageW(windowHandle, keyboardHookMessage, VK_RIGHT, ctrlFlag));
+        QTRY_COMPARE(handView->currentIndex().row(), 8);
+        QVERIFY(PostMessageW(windowHandle, keyboardHookMessage, VK_LEFT, ctrlFlag));
+        QTRY_COMPARE(handView->currentIndex().row(), 1);
+#endif
+    }
+
     void testPlayerNameDialogIsAccessibleAndSaves() {
         GameEngine engine;
         AccessibilityService accessibility;
@@ -1634,7 +2026,7 @@ private slots:
             if (!dialog) return;
             auto* edit = dialog->findChild<QLineEdit*>(QStringLiteral("playerNameEdit"));
             if (!edit || !edit->hasFocus()) return;
-            QVERIFY(edit->accessibleName().contains(QString::fromUtf8(u8"玩家一名称")));
+            QVERIFY(edit->accessibleName().contains(QString::fromUtf8(u8"1的新名称")));
             QVERIFY(!edit->accessibleDescription().isEmpty());
             edit->setText(QString::fromUtf8(u8"测试东家"));
             inspected = true;
@@ -1649,7 +2041,7 @@ private slots:
         QVERIFY(statusLabel);
         QTest::keyClick(&window, Qt::Key_1);
         QVERIFY(statusLabel->text().contains(QString::fromUtf8(u8"测试东家")));
-        QVERIFY(!statusLabel->text().contains(QString::fromUtf8(u8"玩家一")));
+        QVERIFY(!statusLabel->text().contains(QString::fromUtf8(u8"玩家")));
     }
 
     void testCardSelectionSoundsMatchWanerbaResources() {
@@ -2036,13 +2428,13 @@ private slots:
         QVERIFY(!statusLabel->text().contains(QString::fromUtf8(u8"自己")));
         QTest::keyClick(&window, Qt::Key_2);
         QVERIFY(statusLabel->text().contains(QString::fromUtf8(u8"南风")));
-        QVERIFY(!statusLabel->text().contains(QString::fromUtf8(u8"玩家二")));
+        QVERIFY(!statusLabel->text().contains(QString::fromUtf8(u8"玩家")));
         QTest::keyClick(&window, Qt::Key_3);
         QVERIFY(statusLabel->text().contains(QString::fromUtf8(u8"西风")));
-        QVERIFY(!statusLabel->text().contains(QString::fromUtf8(u8"玩家三")));
+        QVERIFY(!statusLabel->text().contains(QString::fromUtf8(u8"玩家")));
         QTest::keyClick(&window, Qt::Key_4);
         QVERIFY(statusLabel->text().contains(QString::fromUtf8(u8"北风")));
-        QVERIFY(!statusLabel->text().contains(QString::fromUtf8(u8"玩家四")));
+        QVERIFY(!statusLabel->text().contains(QString::fromUtf8(u8"玩家")));
 
         fs.players[0].role = Role::Farmer;
         fs.players[1].role = Role::Landlord;
@@ -3897,6 +4289,42 @@ private slots:
             QVERIFY2(SoundService::validateWaveFile(path, &error),
                      qPrintable(path + error));
         }
+    }
+
+    void testAiBattleHumanTurnUsesItsOwnWaitSeconds() {
+        AppSettings offline;
+        offline.autoPassEnabled = false;
+        offline.autoPassSeconds = 3;
+        SettingsRepository offlineRepository;
+        offlineRepository.setData(offline.toJson());
+        DataPaths::ensureDirectories();
+        QVERIFY(offlineRepository.save(DataPaths::settingsFile()));
+
+        AiBattleSettings battle;
+        battle.autoPassEnabled = true;
+        battle.autoPassSeconds = 1800;
+        battle.landlordMustLeadFirstTurn = false;
+        SettingsRepository battleRepository;
+        battleRepository.setData(battle.toJson());
+        QVERIFY(battleRepository.save(DataPaths::aiBattleSettingsFile()));
+
+        GameEngine engine;
+        preparePlayingHand(engine, handOfCounts({{Rank::Three, 2}}));
+        AccessibilityService accessibility;
+        MainWindow window(engine, accessibility, nullptr, GameMode::AiBattle);
+        window.show();
+        QVERIFY(QTest::qWaitForWindowActive(&window));
+        window.refreshFromState();
+        QLabel* countdown = nullptr;
+        for (auto* label : window.findChildren<QLabel*>()) {
+            if (label->accessibleName() == QString::fromUtf8(u8"本轮操作剩余时间")) {
+                countdown = label;
+                break;
+            }
+        }
+        QVERIFY(countdown);
+        QVERIFY(countdown->isVisible());
+        QCOMPARE(countdown->text(), QString::fromUtf8(u8"本轮操作剩余1800秒"));
     }
 
 private:

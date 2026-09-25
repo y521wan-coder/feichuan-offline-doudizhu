@@ -255,9 +255,10 @@ private slots:
         events.push_back(playedEvent(triples));
 
         std::vector<Card> airplaneWithPairs;
-        appendSameRank(airplaneWithPairs, Rank::Three, 5);
+        appendSameRank(airplaneWithPairs, Rank::Three, 3);
         appendSameRank(airplaneWithPairs, Rank::Four, 3);
         appendSameRank(airplaneWithPairs, Rank::Two, 2);
+        appendSameRank(airplaneWithPairs, Rank::Five, 2);
         events.push_back(playedEvent(airplaneWithPairs));
 
         for (int count = 4; count <= 8; ++count) {

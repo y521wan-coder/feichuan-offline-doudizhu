@@ -14,7 +14,8 @@ public:
     static std::wstring formatRankSpeech(Rank rank);
     static std::wstring formatSameRankSpeech(Rank rank, int count);
     static std::wstring formatPlayedCards(const CardPattern& pattern,
-                                          const std::vector<Card>& cards);
+                                          const std::vector<Card>& cards,
+                                          int activePlayerCount = 3);
     static std::wstring formatHandPosition(int position, int total);
     static std::wstring formatCardWithSelection(const Card& card, bool selected, int position, int total, int sameRankCount);
 };

@@ -15,12 +15,15 @@
 #include <QString>
 #include <QVector>
 #include <memory>
+#include <optional>
 #include "sound_service.h"
 #include "../app/app_settings.h"
 #include "../core/engine/game_command.h"
 #include "../core/engine/game_event.h"
 #include "../core/engine/game_state.h"
 #include "../accessibility/announcement.h"
+#include "../app/game_mode.h"
+#include "../ai/ai_decision_request.h"
 class QShortcut;
 namespace fpdz {
 class GameEngine;
@@ -34,16 +37,21 @@ class DiagnosticTraceService;
 class ResultDialog;
 class CardTableWidget;
 class ShortcutDialog;
+class AiServiceClient;
+class AiBattleStatisticsRepository;
 class MainWindow : public QMainWindow, public QAbstractNativeEventFilter {
     Q_OBJECT
 public:
     explicit MainWindow(GameEngine& engine, AccessibilityService& accessibility,
                         DiagnosticTraceService* diagnosticTrace = nullptr,
+                        GameMode gameMode = GameMode::Offline,
                         QWidget* parent = nullptr);
     ~MainWindow() override;
     void startNewGame();
     void refreshFromState(int preferredHandRow = -1,
                           bool restoreHandFocusSilently = false);
+signals:
+    void returnToModeSelectionRequested();
 protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
     bool focusNextPrevChild(bool next) override;
@@ -81,6 +89,23 @@ private:
     void loadSettings();
     void saveSettings();
     void openSettingsDialog();
+    void openAiBattleSettingsDialog();
+    void ensureAiBattleFirstRunPrompt();
+    bool validateAiBattleStart();
+    bool confirmAiBattlePrivacy();
+    void loadAiBattleSettings();
+    void saveAiBattleSettings();
+    void requestCloudDecision();
+    void handleAiServiceMessage(const QJsonObject& message);
+    void handleCloudDecisionResponse(const QJsonObject& message);
+    void recordCloudRequestOutcome(const AiDecisionRequest& request,
+                                   bool success, const QString& outcome,
+                                   const QString& errorCode, int latencyMilliseconds,
+                                   qint64 inputTokens = -1, qint64 outputTokens = -1,
+                                   int actionId = -1);
+    void showCloudFault(const QString& safeMessage);
+    void retryCloudTurn();
+    void stopCloudWait();
     void openShortcutDialog();
     void openSoundManagerDialog();
     bool openHelpTextFile(const QString& fileName);
@@ -103,6 +128,7 @@ private:
     void traceHandAction(const QString& action, const QJsonObject& before,
                          const QJsonObject& details = {});
     void requestApplicationExit();
+    void requestReturnToModeSelection();
     void installKeyboardHook();
     void uninstallKeyboardHook();
     void registerSystemHotkeys();
@@ -128,6 +154,7 @@ private:
     void announceCurrentTurn();
     void announceLastAction();
     void copyDiagnosticInformation();
+    void copyAiBattleGames();
     QString buildDiagnosticReport() const;
     void applyPlayerDisplayNamesToState();
     std::wstring playerDisplayName(PlayerId playerId) const;
@@ -141,6 +168,7 @@ private:
     void handleFinishedResult(const CommandResult& result, int announcementDelayMilliseconds = 0);
     void showRoundResult();
     void returnToMainScreen();
+    bool landlordMustLeadFirstTurn() const;
     void updateTurnCountdown(bool humanTurn);
     int playSoundsForResult(const CommandResult& result, bool appendYourTurn = false);
     void playSound(SoundId id);
@@ -152,6 +180,14 @@ private:
     GameEngine& m_engine;
     AccessibilityService& m_accessibility;
     DiagnosticTraceService* m_diagnosticTrace = nullptr;
+    GameMode m_gameMode = GameMode::Offline;
+    std::unique_ptr<AiServiceClient> m_aiService;
+    std::unique_ptr<SettingsRepository> m_aiBattleSettingsRepo;
+    std::unique_ptr<AiBattleStatisticsRepository> m_aiBattleStatisticsRepo;
+    AiBattleSettings m_aiBattleSettings;
+    std::optional<AiDecisionRequest> m_pendingCloudRequest;
+    QElapsedTimer m_cloudWaitElapsed;
+    bool m_cloudTurnPaused = false;
     std::unique_ptr<HandListModel> m_handModel;
     std::unique_ptr<PlayerStatusModel> m_playerModel;
     std::unique_ptr<SettingsRepository> m_settingsRepo;
@@ -180,6 +216,7 @@ private:
     QVector<QShortcut*> m_applicationShortcuts;
     QAction* m_battleAction = nullptr;
     QAction* m_pauseAction = nullptr;
+    QAction* m_retryCloudAction = nullptr;
     QAction* m_quitAction = nullptr;
     QAction* m_settingsAction = nullptr;
     QMenu* m_gameMenu = nullptr;
@@ -200,5 +237,6 @@ private:
 
 std::unique_ptr<MainWindow> createMainWindow(GameEngine& engine,
                                              AccessibilityService& accessibility,
-                                             DiagnosticTraceService* diagnosticTrace = nullptr);
+                                             DiagnosticTraceService* diagnosticTrace = nullptr,
+                                             GameMode gameMode = GameMode::Offline);
 } // namespace fpdz

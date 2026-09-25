@@ -126,6 +126,35 @@ set_tests_properties(
     PROPERTIES TIMEOUT 300
 )
 
+fpdz_add_test(test_ai_battle_persistence
+    SOURCES persistence/test_ai_battle_persistence.cpp
+    LIBS fpdz_persistence fpdz_ai
+)
+
+add_executable(ai_service_test_host
+    ${CMAKE_SOURCE_DIR}/apps/ai_service/main.cpp
+    ${CMAKE_SOURCE_DIR}/apps/ai_service/ai_service.cpp
+    ${CMAKE_SOURCE_DIR}/apps/ai_service/ai_service.h
+    ${CMAKE_SOURCE_DIR}/apps/ai_service/credential_store.cpp
+    ${CMAKE_SOURCE_DIR}/apps/ai_service/credential_store.h
+)
+target_include_directories(ai_service_test_host PRIVATE
+    "${CMAKE_SOURCE_DIR}/apps/ai_service"
+)
+target_compile_definitions(ai_service_test_host PRIVATE FPDZ_AI_SERVICE_TEST_HOOKS=1)
+target_link_libraries(ai_service_test_host PRIVATE Qt6::Core Qt6::Network crypt32)
+set_target_properties(ai_service_test_host PROPERTIES AUTOMOC ON)
+
+fpdz_add_test(test_ai_service
+    SOURCES ai_service/test_ai_service.cpp
+            ${CMAKE_SOURCE_DIR}/apps/ai_service/credential_store.cpp
+    LIBS Qt6::Network crypt32
+)
+add_dependencies(test_ai_service ai_service_test_host FeichuanDoudizhuAiService)
+target_include_directories(test_ai_service PRIVATE
+    "${CMAKE_SOURCE_DIR}/apps/ai_service"
+)
+
 # AI tests
 fpdz_add_test(test_ai
     SOURCES ai/test_ai.cpp
@@ -143,6 +172,13 @@ fpdz_add_test(test_ai_strength
 add_executable(ai_validation_runner ai/ai_validation_runner.cpp)
 target_link_libraries(ai_validation_runner PRIVATE fpdz_core fpdz_ai Qt6::Core)
 target_include_directories(ai_validation_runner PRIVATE "${CMAKE_SOURCE_DIR}/src")
+
+# Manual real-provider runner. Never registered with CTest because it spends
+# real API quota; it is only invoked by an operator after explicit authorization.
+add_executable(ai_real_model_runner ai/ai_real_model_runner.cpp)
+target_link_libraries(ai_real_model_runner PRIVATE fpdz_app fpdz_ai fpdz_core Qt6::Core)
+target_include_directories(ai_real_model_runner PRIVATE "${CMAKE_SOURCE_DIR}/src")
+set_target_properties(ai_real_model_runner PROPERTIES AUTOMOC ON)
 set_tests_properties(test_ai PROPERTIES
     TIMEOUT 900
     ENVIRONMENT "QTEST_FUNCTION_TIMEOUT=900000"

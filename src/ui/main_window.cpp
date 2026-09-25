@@ -7,16 +7,21 @@
 #include "dialogs/shortcut_dialog.h"
 #include "dialogs/sound_manager_dialog.h"
 #include "dialogs/result_dialog.h"
+#include "dialogs/ai_battle_settings_dialog.h"
+#include "dialogs/credential_manager_dialog.h"
 #include "../core/engine/game_engine.h"
 #include "../core/engine/turn_manager.h"
 #include "../accessibility/accessibility_service.h"
 #include "../ai/ai_player.h"
 #include "../ai/simple_ai.h"
 #include "../ai/standard_ai.h"
+#include "../ai/local_ai_decision_adapter.h"
+#include "../app/ai_service_client.h"
 #include "../persistence/data_paths.h"
 #include "../ai/hint_service.h"
 #include "../persistence/settings_repository.h"
 #include "../persistence/statistics_repository.h"
+#include "../persistence/ai_battle_statistics_repository.h"
 #include "../persistence/data_paths.h"
 #include "../core/text/card_text_formatter.h"
 #include "../core/text/game_text_formatter.h"
@@ -62,6 +67,7 @@
 #include <QAction>
 #include <QShortcut>
 #include <QSignalBlocker>
+#include <QUuid>
 #include <algorithm>
 #include <array>
 #include <utility>
@@ -208,10 +214,6 @@ QString cardFourVoiceFile(PlayerId playerId, const QString& fileName,
                           bool humanUsesFemaleVoice) {
     return "card_four/" + cardFourVoiceDir(playerId, humanUsesFemaleVoice) +
            "/" + fileName + ".wav";
-}
-
-std::unique_ptr<AiPlayer> createAiPlayer(AiDifficulty difficulty) {
-    return std::make_unique<StandardAiPlayer>(difficulty);
 }
 
 int aiDelayMilliseconds(int setting) {
@@ -431,7 +433,9 @@ bool isSingleFireKey(DWORD virtualKey, bool ctrlDown = false,
         shortcutFromVirtualKey(virtualKey, ctrlDown, shiftDown, altDown));
     if (!action) return false;
     return *action != ShortcutAction::PreviousRankGroup &&
-           *action != ShortcutAction::NextRankGroup;
+           *action != ShortcutAction::NextRankGroup &&
+           *action != ShortcutAction::PreviousWholeRankGroup &&
+           *action != ShortcutAction::NextWholeRankGroup;
 }
 
 LRESULT CALLBACK lowLevelKeyboardProc(int code, WPARAM wParam, LPARAM lParam) {
@@ -535,9 +539,10 @@ LRESULT CALLBACK lowLevelKeyboardProc(int code, WPARAM wParam, LPARAM lParam) {
 } // namespace
 
 MainWindow::MainWindow(GameEngine& engine, AccessibilityService& accessibility,
-                       DiagnosticTraceService* diagnosticTrace, QWidget* parent)
+                       DiagnosticTraceService* diagnosticTrace, GameMode gameMode,
+                       QWidget* parent)
     : QMainWindow(parent), m_engine(engine), m_accessibility(accessibility),
-      m_diagnosticTrace(diagnosticTrace) {
+      m_diagnosticTrace(diagnosticTrace), m_gameMode(gameMode) {
 #ifdef Q_OS_WIN
     g_openMenuCount = 0;
 #endif
@@ -551,6 +556,29 @@ MainWindow::MainWindow(GameEngine& engine, AccessibilityService& accessibility,
     m_statisticsRepo = std::make_unique<StatisticsRepository>();
     m_statisticsRepo->load(DataPaths::statisticsFile());
     loadSettings();
+    if (m_gameMode == GameMode::AiBattle) {
+        m_aiBattleSettingsRepo = std::make_unique<SettingsRepository>();
+        m_aiBattleStatisticsRepo = std::make_unique<AiBattleStatisticsRepository>();
+        m_aiBattleStatisticsRepo->load(DataPaths::aiBattleStatisticsFile());
+        loadAiBattleSettings();
+        m_aiService = std::make_unique<AiServiceClient>(this);
+        connect(m_aiService.get(), &AiServiceClient::messageReceived,
+                this, &MainWindow::handleAiServiceMessage);
+        connect(m_aiService.get(), &AiServiceClient::serviceFailed,
+                this, [this](const QString& message) {
+                    if (m_pendingCloudRequest) {
+                        const auto request = *m_pendingCloudRequest;
+                        const int latency = m_cloudWaitElapsed.isValid()
+                            ? static_cast<int>(m_cloudWaitElapsed.elapsed()) : 0;
+                        recordCloudRequestOutcome(request, false,
+                                                  QStringLiteral("client_failure"),
+                                                  QStringLiteral("ai_service_failed"),
+                                                  latency);
+                        showCloudFault(message);
+                    }
+                });
+        m_aiService->start();
+    }
     if (m_diagnosticTrace) {
         m_diagnosticTrace->record(QJsonObject{
             {QStringLiteral("type"), QStringLiteral("screen_reader_backend_initialized")},
@@ -617,9 +645,14 @@ MainWindow::MainWindow(GameEngine& engine, AccessibilityService& accessibility,
             QTimer::singleShot(250, this, [this]() { checkForUpdates(false); });
         }
     });
+    if (m_gameMode == GameMode::AiBattle) {
+        QTimer::singleShot(0, this, &MainWindow::ensureAiBattleFirstRunPrompt);
+    }
 }
 
 MainWindow::~MainWindow() {
+    stopCloudWait();
+    if (m_aiService) m_aiService->stop();
     unregisterSystemHotkeys();
     uninstallKeyboardHook();
 #ifdef Q_OS_WIN
@@ -630,8 +663,10 @@ MainWindow::~MainWindow() {
 
 std::unique_ptr<MainWindow> createMainWindow(GameEngine& engine,
                                              AccessibilityService& accessibility,
-                                             DiagnosticTraceService* diagnosticTrace) {
-    return std::make_unique<MainWindow>(engine, accessibility, diagnosticTrace);
+                                             DiagnosticTraceService* diagnosticTrace,
+                                             GameMode gameMode) {
+    return std::make_unique<MainWindow>(engine, accessibility, diagnosticTrace,
+                                        gameMode);
 }
 
 void MainWindow::setupMenus() {
@@ -667,6 +702,26 @@ void MainWindow::setupMenus() {
 
     gameMenu->addSeparator();
 
+    if (m_gameMode == GameMode::AiBattle) {
+        m_retryCloudAction = gameMenu->addAction(
+            QString::fromUtf8(u8"重试当前云模型回合(&R)"));
+        m_retryCloudAction->setObjectName(QStringLiteral("retryCloudTurnAction"));
+        m_retryCloudAction->setEnabled(false);
+        connect(m_retryCloudAction, &QAction::triggered,
+                this, &MainWindow::retryCloudTurn);
+        auto* copyGamesAction = gameMenu->addAction(
+            QString::fromUtf8(u8"复制最近50局完整对战记录(&J)"));
+        copyGamesAction->setObjectName(QStringLiteral("copyAiBattleGamesAction"));
+        connect(copyGamesAction, &QAction::triggered,
+                this, &MainWindow::copyAiBattleGames);
+    }
+
+    auto* returnModeAction = gameMenu->addAction(
+        QString::fromUtf8(u8"返回模式选择(&M)"));
+    returnModeAction->setObjectName(QStringLiteral("returnToModeSelectionAction"));
+    connect(returnModeAction, &QAction::triggered,
+            this, &MainWindow::requestReturnToModeSelection);
+
     auto* quitAction = gameMenu->addAction(QString::fromStdWString(L"退出(&Q)"));
     m_quitAction = quitAction;
     quitAction->setShortcut(ShortcutSettings::keySequence(
@@ -697,10 +752,10 @@ void MainWindow::setupMenus() {
             openPlayerNameDialog(playerId);
         });
     };
-    addPlayerNameAction(PlayerId::Player1, u8"设置玩家一名称(&1)");
-    addPlayerNameAction(PlayerId::Player2, u8"设置玩家二名称(&2)");
-    addPlayerNameAction(PlayerId::Player3, u8"设置玩家三名称(&3)");
-    addPlayerNameAction(PlayerId::Player4, u8"设置玩家四名称(&4)");
+    addPlayerNameAction(PlayerId::Player1, u8"设置1号玩家名称(&1)");
+    addPlayerNameAction(PlayerId::Player2, u8"设置2号玩家名称(&2)");
+    addPlayerNameAction(PlayerId::Player3, u8"设置3号玩家名称(&3)");
+    addPlayerNameAction(PlayerId::Player4, u8"设置4号玩家名称(&4)");
     playerNamesMenu->addSeparator();
     auto* resetNamesAction = playerNamesMenu->addAction(QString::fromUtf8(u8"恢复默认玩家名称(&R)"));
     connect(resetNamesAction, &QAction::triggered, this, &MainWindow::resetPlayerDisplayNames);
@@ -734,12 +789,19 @@ void MainWindow::setupMenus() {
         announce(L"已播放测试音效", AnnouncementCategory::System);
     });
 
-    auto* settingsAction = settingsMenu->addAction(QString::fromStdWString(L"设置选项(&O)"));
+    auto* settingsAction = settingsMenu->addAction(
+        m_gameMode == GameMode::AiBattle ? QString::fromUtf8(u8"AI对战设置(&O)")
+                                         : QString::fromStdWString(L"设置选项(&O)"));
     m_settingsAction = settingsAction;
     settingsAction->setShortcut(ShortcutSettings::keySequence(
         m_settings.shortcuts.binding(ShortcutAction::OpenSettings)));
     settingsAction->setShortcutContext(Qt::ApplicationShortcut);
-    connect(settingsAction, &QAction::triggered, this, &MainWindow::openSettingsDialog);
+    if (m_gameMode == GameMode::AiBattle) {
+        connect(settingsAction, &QAction::triggered,
+                this, &MainWindow::openAiBattleSettingsDialog);
+    } else {
+        connect(settingsAction, &QAction::triggered, this, &MainWindow::openSettingsDialog);
+    }
 
     settingsMenu->addSeparator();
     auto* updateAction = settingsMenu->addAction(QString::fromUtf8(u8"手动检查更新(&U)"));
@@ -1048,12 +1110,22 @@ void MainWindow::applyShortcutBindings() {
 }
 
 void MainWindow::startNewGame() {
+    if (m_gameMode == GameMode::AiBattle) {
+        if (!validateAiBattleStart() || !confirmAiBattlePrivacy()) return;
+        m_settings.playerCount = m_aiBattleSettings.playerCount;
+    }
     resumeHandAccessibilityForUserAction();
     GameCommand cmd;
     cmd.type = GameCommandType::StartGame;
     cmd.playerCount = m_settings.playerCount;
     auto result = m_engine.execute(cmd);
     if (result.success) {
+        if (m_gameMode == GameMode::AiBattle && m_aiBattleStatisticsRepo) {
+            DataPaths::ensureDirectories();
+            m_aiBattleStatisticsRepo->recordGameStarted(
+                DataPaths::aiBattleLogsDir(), m_engine.fullState(),
+                m_aiBattleSettings);
+        }
         applyPlayerDisplayNamesToState();
         m_lastActionText.clear();
         m_lastPlayedCardsText.clear();
@@ -1146,7 +1218,7 @@ void MainWindow::refreshFromState(int preferredHandRow, bool restoreHandFocusSil
     }
     m_wasHumanTurn = isHumanTurn;
     m_playButton->setEnabled(isHumanTurn);
-    m_passButton->setEnabled(isHumanTurn);
+    m_passButton->setEnabled(isHumanTurn && !landlordMustLeadFirstTurn());
     m_hintButton->setEnabled(isHumanTurn);
 
     std::wstring statusText = L"手牌:" + std::to_wstring(humanPlayer.hand.size()) + L"张";
@@ -1257,9 +1329,18 @@ void MainWindow::processAiBid() {
         showBiddingControls();
         return;
     }
-    const auto difficulty = static_cast<AiDifficulty>(m_settings.aiDifficulty);
-    auto ai = createAiPlayer(difficulty);
-    executeAiBidCommand(ai->decideBid(m_engine.state(), currentPlayer));
+    if (m_gameMode == GameMode::AiBattle &&
+        m_aiBattleSettings.seats[static_cast<std::size_t>(currentPlayer)].kind ==
+            SeatControllerKind::CloudAi) {
+        requestCloudDecision();
+        return;
+    }
+    const auto difficulty = m_gameMode == GameMode::AiBattle
+        ? m_aiBattleSettings.seats[static_cast<std::size_t>(currentPlayer)].localDifficulty
+        : static_cast<AiDifficulty>(m_settings.aiDifficulty);
+    LocalAiDecisionAdapter ai;
+    executeAiBidCommand(ai.requestBid(makeAiObservation(m_engine.state(), currentPlayer),
+                                      difficulty));
 }
 
 void MainWindow::executeAiBidCommand(const GameCommand& command) {
@@ -1311,9 +1392,18 @@ void MainWindow::processAiPlay() {
         refreshFromState();
         return;
     }
-    const auto difficulty = static_cast<AiDifficulty>(m_settings.aiDifficulty);
-    auto ai = createAiPlayer(difficulty);
-    executeAiPlayCommand(ai->decidePlay(m_engine.state(), currentPlayer));
+    if (m_gameMode == GameMode::AiBattle &&
+        m_aiBattleSettings.seats[static_cast<std::size_t>(currentPlayer)].kind ==
+            SeatControllerKind::CloudAi) {
+        requestCloudDecision();
+        return;
+    }
+    const auto difficulty = m_gameMode == GameMode::AiBattle
+        ? m_aiBattleSettings.seats[static_cast<std::size_t>(currentPlayer)].localDifficulty
+        : static_cast<AiDifficulty>(m_settings.aiDifficulty);
+    LocalAiDecisionAdapter ai;
+    executeAiPlayCommand(ai.requestPlay(makeAiObservation(m_engine.state(), currentPlayer),
+                                        difficulty));
 }
 
 void MainWindow::executeAiPlayCommand(const GameCommand& command) {
@@ -1404,7 +1494,8 @@ void MainWindow::onPass() {
     GameCommand cmd;
     cmd.type = GameCommandType::Pass;
     cmd.playerId = PlayerId::Player1;
-    cmd.allowPassAsLeader = TurnManager::isLeader(m_engine.state());
+    cmd.allowPassAsLeader = TurnManager::isLeader(m_engine.state()) &&
+        !landlordMustLeadFirstTurn();
     auto result = m_engine.execute(cmd);
 
     if (!result.success) {
@@ -2027,7 +2118,11 @@ bool MainWindow::triggerShortcutAction(ShortcutAction action, const QString& sou
             source.isEmpty() ? QStringLiteral("configured_shortcut") : source);
     case ShortcutAction::OpenSettings:
         dismissMenusForGameAction();
-        openSettingsDialog();
+        if (m_gameMode == GameMode::AiBattle) {
+            openAiBattleSettingsDialog();
+        } else {
+            openSettingsDialog();
+        }
         return true;
     case ShortcutAction::PauseResume: {
         GameCommand cmd;
@@ -2065,6 +2160,8 @@ bool MainWindow::triggerShortcutAction(ShortcutAction action, const QString& sou
         return true;
     case ShortcutAction::PreviousRankGroup:
     case ShortcutAction::NextRankGroup:
+    case ShortcutAction::PreviousWholeRankGroup:
+    case ShortcutAction::NextWholeRankGroup:
     case ShortcutAction::FirstRankGroup:
     case ShortcutAction::LastRankGroup: {
         if (!m_handView || !m_handModel || m_handModel->rowCount() <= 0) return false;
@@ -2076,6 +2173,10 @@ bool MainWindow::triggerShortcutAction(ShortcutAction action, const QString& sou
             target = m_handModel->previousBrowsableGroupStartRow(row);
         } else if (action == ShortcutAction::NextRankGroup) {
             target = m_handModel->nextBrowsableGroupStartRow(row);
+        } else if (action == ShortcutAction::PreviousWholeRankGroup) {
+            target = m_handModel->previousBrowsableMultiCardGroupStartRow(row);
+        } else if (action == ShortcutAction::NextWholeRankGroup) {
+            target = m_handModel->nextBrowsableMultiCardGroupStartRow(row);
         } else if (action == ShortcutAction::FirstRankGroup) {
             target = m_handModel->firstUnselectedRow();
         } else {
@@ -2168,7 +2269,9 @@ bool MainWindow::handleKeyPress(QKeyEvent* event) {
         ShortcutSettings::fromKeyEvent(event->key(), modifiers));
     if (configuredAction) {
         const bool repeatable = *configuredAction == ShortcutAction::PreviousRankGroup ||
-            *configuredAction == ShortcutAction::NextRankGroup;
+            *configuredAction == ShortcutAction::NextRankGroup ||
+            *configuredAction == ShortcutAction::PreviousWholeRankGroup ||
+            *configuredAction == ShortcutAction::NextWholeRankGroup;
         if (event->isAutoRepeat() && !repeatable) return true;
         return triggerShortcutAction(*configuredAction, QStringLiteral("qt_event"));
     }
@@ -2441,7 +2544,7 @@ std::wstring MainWindow::formatEventForAnnouncement(const GameEvent& event) cons
         return L"轮到" + playerDisplayName(event.playerId);
     case GameEventType::CardsPlayed:
         return playedCardsPlayerDisplayName(event.playerId) + L"出了" +
-               CardTextFormatter::formatPlayedCards(event.pattern, event.cards);
+               CardTextFormatter::formatPlayedCards(event.pattern, event.cards, m_engine.fullState().activePlayerCount);
     case GameEventType::PlayerPassed:
         return playedCardsPlayerDisplayName(event.playerId);
     case GameEventType::TrickReset:
@@ -2459,7 +2562,7 @@ void MainWindow::presentPlayedCards(const GameEvent& event) {
 
     const std::wstring playerName = playedCardsPlayerDisplayName(event.playerId);
     const std::wstring visibleText = playerName + L"，" +
-        CardTextFormatter::formatPlayedCards(event.pattern, event.cards);
+        CardTextFormatter::formatPlayedCards(event.pattern, event.cards, m_engine.fullState().activePlayerCount);
     if (m_statusLabel) {
         const QString status = QString::fromStdWString(visibleText);
         m_statusLabel->setText(status);
@@ -2673,6 +2776,312 @@ void MainWindow::openSettingsDialog() {
     });
 }
 
+void MainWindow::loadAiBattleSettings() {
+    if (m_aiBattleSettingsRepo &&
+        m_aiBattleSettingsRepo->load(DataPaths::aiBattleSettingsFile())) {
+        const QJsonObject saved = m_aiBattleSettingsRepo->data();
+        m_aiBattleSettings = AiBattleSettings::fromJson(saved);
+        if (!saved.contains(QStringLiteral("autoPassEnabled"))) {
+            m_aiBattleSettings.autoPassEnabled = m_settings.autoPassEnabled;
+        }
+        if (!saved.contains(QStringLiteral("autoPassSeconds"))) {
+            m_aiBattleSettings.autoPassSeconds = m_settings.autoPassSeconds;
+        }
+    } else {
+        m_aiBattleSettings = AiBattleSettings{};
+        m_aiBattleSettings.autoPassEnabled = m_settings.autoPassEnabled;
+        m_aiBattleSettings.autoPassSeconds = m_settings.autoPassSeconds;
+    }
+    m_aiBattleSettings.normalize();
+}
+
+void MainWindow::saveAiBattleSettings() {
+    if (!m_aiBattleSettingsRepo) return;
+    DataPaths::ensureDirectories();
+    m_aiBattleSettings.normalize();
+    m_aiBattleSettingsRepo->setData(m_aiBattleSettings.toJson());
+    m_aiBattleSettingsRepo->save(DataPaths::aiBattleSettingsFile());
+}
+
+void MainWindow::ensureAiBattleFirstRunPrompt() {
+    if (m_gameMode != GameMode::AiBattle || !m_aiService) return;
+    if (qApp->property("fpdz.suppressStartupPrompts").toBool()) return;
+    const auto response = m_aiService->requestSync({
+        {QStringLiteral("type"), QStringLiteral("credentials_list")}});
+    if (!response.value("ok").toBool() ||
+        !response.value("credentials").toArray().isEmpty()) return;
+    announce(L"尚未配置云模型", AnnouncementCategory::System,
+             AnnouncementPriority::High);
+    QMessageBox message(QMessageBox::Information,
+                        QString::fromUtf8(u8"尚未配置云模型"),
+                        QString::fromUtf8(u8"AI对战至少需要一个云模型认证。现在只打开认证管理，不会自动联网，也不会创建空认证。"),
+                        QMessageBox::Ok | QMessageBox::Cancel, this);
+    message.button(QMessageBox::Ok)->setText(QString::fromUtf8(u8"打开认证管理"));
+    message.button(QMessageBox::Cancel)->setText(QString::fromUtf8(u8"稍后设置"));
+    if (message.exec() == QMessageBox::Ok) {
+        CredentialManagerDialog dialog(*m_aiService, {}, this);
+        dialog.exec();
+    }
+}
+
+void MainWindow::openAiBattleSettingsDialog() {
+    if (!m_aiService || !m_aiService->isRunning()) {
+        QMessageBox::warning(this, QString::fromUtf8(u8"AI服务不可用"),
+                             m_aiService ? m_aiService->lastError()
+                                         : QString::fromUtf8(u8"AI服务尚未启动"));
+        return;
+    }
+    const auto phase = m_engine.state().phase();
+    const bool inProgress = phase == GamePhase::Bidding || phase == GamePhase::Playing ||
+                            phase == GamePhase::Paused;
+    AiBattleSettingsDialog dialog(m_aiBattleSettings, *m_aiService, inProgress, this);
+    if (dialog.exec() != QDialog::Accepted) return;
+    m_aiBattleSettings = dialog.settings();
+    saveAiBattleSettings();
+    updateTurnCountdown(m_engine.state().phase() == GamePhase::Playing &&
+                        m_engine.fullState().currentPlayer == PlayerId::Player1);
+    announce(L"AI对战设置已保存", AnnouncementCategory::System);
+}
+
+bool MainWindow::validateAiBattleStart() {
+    QString reason;
+    if (!m_aiBattleSettings.validForStart(&reason)) {
+        QMessageBox message(QMessageBox::Information,
+                            QString::fromUtf8(u8"AI对战尚未配置完成"), reason,
+                            QMessageBox::Ok | QMessageBox::Cancel, this);
+        message.button(QMessageBox::Ok)->setText(QString::fromUtf8(u8"打开AI设置"));
+        message.button(QMessageBox::Cancel)->setText(QString::fromUtf8(u8"取消"));
+        if (message.exec() == QMessageBox::Ok) openAiBattleSettingsDialog();
+        return false;
+    }
+    if (!m_aiService || !m_aiService->isRunning()) {
+        QMessageBox::warning(this, QString::fromUtf8(u8"AI服务不可用"),
+                             m_aiService ? m_aiService->lastError()
+                                         : QString::fromUtf8(u8"AI服务尚未启动"));
+        return false;
+    }
+    return true;
+}
+
+bool MainWindow::confirmAiBattlePrivacy() {
+    if (!m_aiService) return false;
+    const auto response = m_aiService->requestSync({
+        {QStringLiteral("type"), QStringLiteral("credentials_list")}});
+    if (!response.value("ok").toBool()) return false;
+    const auto credentials = response.value("credentials").toArray();
+    for (int seatIndex = 1; seatIndex < m_aiBattleSettings.playerCount; ++seatIndex) {
+        const auto& seat = m_aiBattleSettings.seats[static_cast<std::size_t>(seatIndex)];
+        if (seat.kind != SeatControllerKind::CloudAi) continue;
+        QJsonObject credential;
+        for (const auto& value : credentials) {
+            if (value.toObject().value("id").toString() == seat.credentialId) {
+                credential = value.toObject();
+                break;
+            }
+        }
+        const QString host = QUrl(credential.value("request_url").toString()).host().toLower();
+        if (host.isEmpty()) return false;
+        if (m_aiBattleSettings.privacyConsents.value(seat.credentialId).toString() == host) continue;
+        QMessageBox message(QMessageBox::Warning,
+                            QString::fromUtf8(u8"确认发送整桌牌局信息"),
+                            QString::fromUtf8(u8"认证“%1”将向主机 %2 发送真人手牌、其他机器人手牌、隐藏底牌、二人模式盖牌和牌局历史。是否同意？")
+                                .arg(credential.value("name").toString(), host),
+                            QMessageBox::Yes | QMessageBox::No, this);
+        message.button(QMessageBox::Yes)->setText(QString::fromUtf8(u8"同意"));
+        message.button(QMessageBox::No)->setText(QString::fromUtf8(u8"不同意"));
+        message.setDefaultButton(QMessageBox::No);
+        if (message.exec() != QMessageBox::Yes) return false;
+        m_aiBattleSettings.privacyConsents[seat.credentialId] = host;
+    }
+    saveAiBattleSettings();
+    return true;
+}
+
+void MainWindow::requestCloudDecision() {
+    if (!m_aiService || m_pendingCloudRequest) return;
+    const auto phase = m_engine.state().phase();
+    if (phase != GamePhase::Bidding && phase != GamePhase::Playing) return;
+    const PlayerId player = m_engine.fullState().currentPlayer;
+    if (player == PlayerId::Player1) return;
+    const auto& controller =
+        m_aiBattleSettings.seats[static_cast<std::size_t>(player)];
+    m_cloudTurnPaused = false;
+    if (m_retryCloudAction) m_retryCloudAction->setEnabled(false);
+    const QString requestId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    m_pendingCloudRequest = AiActionCatalog::create(
+        m_engine.state(), player, controller, requestId);
+    m_pendingCloudRequest->strategyPrompt = m_aiBattleSettings.strategyPrompt;
+    const QByteArray encoded = QJsonDocument(m_pendingCloudRequest->toServiceJson())
+                                   .toJson(QJsonDocument::Compact);
+    if (m_aiBattleStatisticsRepo) {
+        DataPaths::ensureDirectories();
+        m_aiBattleStatisticsRepo->recordDecisionStarted(
+            DataPaths::aiBattleLogsDir(), *m_pendingCloudRequest, encoded.size());
+    }
+    if (encoded.size() > AI_MAX_MESSAGE_BYTES) {
+        recordCloudRequestOutcome(*m_pendingCloudRequest, false,
+                                  QStringLiteral("request_rejected"),
+                                  QStringLiteral("prompt_too_large"), 0);
+        showCloudFault(QString::fromUtf8(u8"本回合模型请求超过128 KiB"));
+        return;
+    }
+    // AI 思考过程不朗读也不显示：直接等结果，出牌时再正常播报。
+    m_cloudWaitElapsed.restart();
+    if (!m_aiService->requestDecision(*m_pendingCloudRequest)) {
+        recordCloudRequestOutcome(*m_pendingCloudRequest, false,
+                                  QStringLiteral("client_failure"),
+                                  QStringLiteral("ipc_send_failed"), 0);
+        showCloudFault(m_aiService->lastError());
+    }
+}
+
+void MainWindow::handleAiServiceMessage(const QJsonObject& message) {
+    if (message.value("type").toString() == QStringLiteral("decision_result")) {
+        handleCloudDecisionResponse(message);
+    }
+}
+
+void MainWindow::handleCloudDecisionResponse(const QJsonObject& message) {
+    if (!m_pendingCloudRequest) return;
+    const AiDecisionResponse response = AiDecisionResponse::fromServiceJson(message);
+    const auto request = *m_pendingCloudRequest;
+    if (response.requestId != request.requestId) return;
+    stopCloudWait();
+    if (!response.matches(request, m_engine.state())) {
+        recordCloudRequestOutcome(request, false,
+                                  QStringLiteral("response_rejected"),
+                                  QStringLiteral("response_mismatch"),
+                                  response.latencyMilliseconds,
+                                  response.inputTokens, response.outputTokens,
+                                  response.actionId);
+        m_pendingCloudRequest.reset();
+        showCloudFault(QString::fromUtf8(u8"已丢弃错位或过期的模型响应"));
+        return;
+    }
+    if (!response.success) {
+        recordCloudRequestOutcome(request, false,
+                                  QStringLiteral("service_error"),
+                                  response.errorCode, response.latencyMilliseconds,
+                                  response.inputTokens, response.outputTokens);
+        m_pendingCloudRequest.reset();
+        showCloudFault(response.safeMessage.isEmpty()
+            ? QString::fromUtf8(u8"云模型请求失败") : response.safeMessage);
+        return;
+    }
+    const AiLegalAction* action = AiActionCatalog::find(request, response.actionId);
+    if (!action) {
+        recordCloudRequestOutcome(request, false,
+                                  QStringLiteral("response_rejected"),
+                                  QStringLiteral("unknown_action_id"),
+                                  response.latencyMilliseconds,
+                                  response.inputTokens, response.outputTokens,
+                                  response.actionId);
+        m_pendingCloudRequest.reset();
+        showCloudFault(QString::fromUtf8(u8"模型返回了不存在的动作编号"));
+        return;
+    }
+    const GameCommand command = action->command;
+    m_pendingCloudRequest.reset();
+    if (request.phase == GamePhase::Bidding) executeAiBidCommand(command);
+    else executeAiPlayCommand(command);
+    // executeAi* performs the final GameEngine::execute legality check. A rejected
+    // command leaves the turn unchanged and is surfaced as a model fault below.
+    if (m_engine.state().gameId() == request.gameId &&
+        m_engine.fullState().eventSequence == request.eventSequence) {
+        recordCloudRequestOutcome(request, false,
+                                  QStringLiteral("engine_rejected"),
+                                  QStringLiteral("engine_rejected"),
+                                  response.latencyMilliseconds,
+                                  response.inputTokens, response.outputTokens,
+                                  response.actionId);
+        showCloudFault(QString::fromUtf8(u8"本地引擎拒绝了模型动作"));
+    } else {
+        recordCloudRequestOutcome(request, true, QStringLiteral("accepted"), {},
+                                  response.latencyMilliseconds,
+                                  response.inputTokens, response.outputTokens,
+                                  response.actionId);
+    }
+}
+
+void MainWindow::recordCloudRequestOutcome(
+    const AiDecisionRequest& request, bool success, const QString& outcome,
+    const QString& errorCode, int latencyMilliseconds, qint64 inputTokens,
+    qint64 outputTokens, int actionId) {
+    if (!m_aiBattleStatisticsRepo) return;
+    DataPaths::ensureDirectories();
+    m_aiBattleStatisticsRepo->recordRequest(
+        static_cast<int>(request.playerId), request.controller, success,
+        errorCode, latencyMilliseconds, inputTokens, outputTokens);
+    m_aiBattleStatisticsRepo->save(DataPaths::aiBattleStatisticsFile());
+    m_aiBattleStatisticsRepo->recordDecisionFinished(
+        DataPaths::aiBattleLogsDir(), request, success, outcome, errorCode,
+        latencyMilliseconds, inputTokens, outputTokens, actionId,
+        success && !m_engine.fullState().actionHistory.empty()
+            ? static_cast<qint64>(m_engine.fullState().actionHistory.back().sequence) : -1);
+    // The winning cloud move may finish the round before its request outcome is
+    // recorded. Rewrite the same detailed file with that final decision included.
+    if (m_engine.state().phase() == GamePhase::Finished &&
+        m_engine.state().gameId() == request.gameId) {
+        m_aiBattleStatisticsRepo->saveDetailedGame(
+            DataPaths::aiBattleReplaysDir() + QStringLiteral("/detailed"),
+            m_engine.fullState().roundResult, m_engine.fullState(), m_aiBattleSettings);
+    }
+}
+
+void MainWindow::showCloudFault(const QString& safeMessage) {
+    stopCloudWait();
+    m_pendingCloudRequest.reset();
+    m_cloudTurnPaused = true;
+    if (m_retryCloudAction) m_retryCloudAction->setEnabled(true);
+    const PlayerId player = m_engine.fullState().currentPlayer;
+    const auto& controller = m_aiBattleSettings.seats[static_cast<std::size_t>(player)];
+    announce(playerDisplayName(player) + L"，" + controller.credentialName.toStdWString() +
+                 L"，" + controller.model.toStdWString() + L"，" +
+                 safeMessage.toStdWString(),
+             AnnouncementCategory::Error, AnnouncementPriority::High);
+    QMessageBox message(QMessageBox::Critical,
+                        QString::fromUtf8(u8"云模型回合已暂停"),
+                        QString::fromUtf8(u8"认证：%1\n模型：%2\n%3")
+                            .arg(controller.credentialName, controller.model, safeMessage),
+                        QMessageBox::NoButton, this);
+    auto* retry = message.addButton(QString::fromUtf8(u8"重试"), QMessageBox::AcceptRole);
+    auto* settings = message.addButton(QString::fromUtf8(u8"打开AI设置"), QMessageBox::ActionRole);
+    auto* back = message.addButton(QString::fromUtf8(u8"返回模式选择"), QMessageBox::DestructiveRole);
+    auto* keepPaused = message.addButton(QString::fromUtf8(u8"继续暂停"), QMessageBox::RejectRole);
+    keepPaused->hide();
+    message.setEscapeButton(keepPaused);
+    message.exec();
+    if (message.clickedButton() == retry) {
+        retryCloudTurn();
+    } else if (message.clickedButton() == settings) {
+        openAiBattleSettingsDialog();
+    } else if (message.clickedButton() == back) {
+        requestReturnToModeSelection();
+    }
+}
+
+void MainWindow::retryCloudTurn() {
+    if (!m_cloudTurnPaused || m_pendingCloudRequest) return;
+    const auto phase = m_engine.state().phase();
+    const PlayerId player = m_engine.fullState().currentPlayer;
+    if ((phase != GamePhase::Bidding && phase != GamePhase::Playing) ||
+        player == PlayerId::Player1 ||
+        m_aiBattleSettings.seats[static_cast<std::size_t>(player)].kind !=
+            SeatControllerKind::CloudAi) {
+        return;
+    }
+    m_cloudTurnPaused = false;
+    if (m_retryCloudAction) m_retryCloudAction->setEnabled(false);
+    if (phase == GamePhase::Bidding) processAiBid();
+    else processAiPlay();
+}
+
+void MainWindow::stopCloudWait() {
+    if (m_countdownLabel && m_engine.fullState().currentPlayer != PlayerId::Player1) {
+        m_countdownLabel->setVisible(false);
+    }
+}
+
 void MainWindow::openShortcutDialog() {
     ShortcutDialog dialog(m_settings.shortcuts, this);
     if (dialog.exec() != QDialog::Accepted) return;
@@ -2730,7 +3139,7 @@ void MainWindow::openPlayerNameDialog(PlayerId playerId) {
     auto* edit = new QLineEdit(&dialog);
     edit->setObjectName(QStringLiteral("playerNameEdit"));
     edit->setText(currentName);
-    edit->setAccessibleName(seatName + QString::fromUtf8(u8"名称"));
+    edit->setAccessibleName(seatName + QString::fromUtf8(u8"的新名称"));
     edit->setAccessibleDescription(
         QString::fromUtf8(u8"设置后，读屏播报和界面都会使用这个名称"));
     label->setBuddy(edit);
@@ -2793,6 +3202,11 @@ void MainWindow::scheduleAiTurn(int minimumDelayMilliseconds) {
 void MainWindow::handleAutoPassTimeout() {
     if (m_engine.state().phase() != GamePhase::Playing ||
         m_engine.fullState().currentPlayer != PlayerId::Player1) {
+        return;
+    }
+    if (landlordMustLeadFirstTurn()) {
+        announce(L"地主首轮必须出牌，请选择要出的牌", AnnouncementCategory::Turn,
+                 AnnouncementPriority::High);
         return;
     }
 
@@ -2937,6 +3351,30 @@ void MainWindow::requestApplicationExit() {
         m_diagnosticTrace->flush();
     }
     QTimer::singleShot(0, qApp, &QApplication::closeAllWindows);
+}
+
+void MainWindow::requestReturnToModeSelection() {
+    const auto phase = m_engine.state().phase();
+    if (phase == GamePhase::Bidding || phase == GamePhase::Playing ||
+        phase == GamePhase::Paused) {
+        QMessageBox message(QMessageBox::Question,
+                            QString::fromUtf8(u8"确认返回模式选择"),
+                            QString::fromUtf8(u8"牌局正在进行，返回将放弃本局，是否继续？"),
+                            QMessageBox::Yes | QMessageBox::No, this);
+        message.button(QMessageBox::Yes)->setText(QString::fromUtf8(u8"是"));
+        message.button(QMessageBox::No)->setText(QString::fromUtf8(u8"否"));
+        message.setDefaultButton(QMessageBox::No);
+        message.setEscapeButton(QMessageBox::No);
+        if (message.exec() != QMessageBox::Yes) return;
+    }
+    if (m_aiTimer) m_aiTimer->stop();
+    if (m_turnCountdownTimer) m_turnCountdownTimer->stop();
+    if (m_pendingCloudRequest && m_aiService) {
+        m_aiService->cancel(m_pendingCloudRequest->requestId);
+        m_pendingCloudRequest.reset();
+    }
+    stopCloudWait();
+    emit returnToModeSelectionRequested();
 }
 
 void MainWindow::moveHandCursorTo(int row) {
@@ -3318,6 +3756,11 @@ void MainWindow::toggleBattleState() {
 
     CommandResult result;
     if (phase == GamePhase::Playing || phase == GamePhase::Bidding) {
+        if (m_pendingCloudRequest && m_aiService) {
+            m_aiService->cancel(m_pendingCloudRequest->requestId);
+            m_pendingCloudRequest.reset();
+            stopCloudWait();
+        }
         GameCommand cmd;
         cmd.type = GameCommandType::Pause;
         result = m_engine.execute(cmd);
@@ -3374,6 +3817,24 @@ void MainWindow::announcePlayerAtPosition(int position) {
     text += player.role == Role::Farmer ? L"，农民" : L"，身份未定";
 
     announce(text, AnnouncementCategory::System);
+}
+
+void MainWindow::copyAiBattleGames() {
+    if (!m_aiBattleStatisticsRepo) return;
+    const QByteArray bytes = m_aiBattleStatisticsRepo->detailedGamesForCopy(
+        DataPaths::aiBattleReplaysDir() + QStringLiteral("/detailed"));
+    if (bytes.isEmpty()) {
+        announce(L"还没有已完成的AI对战牌局记录", AnnouncementCategory::System);
+        return;
+    }
+    QClipboard* clipboard = QApplication::clipboard();
+    if (!clipboard) {
+        announce(L"复制对战记录失败", AnnouncementCategory::Error, AnnouncementPriority::High);
+        return;
+    }
+    clipboard->setText(QString::fromUtf8(bytes), QClipboard::Clipboard);
+    announce(L"最近50局完整AI对战记录已复制", AnnouncementCategory::System,
+             AnnouncementPriority::High);
 }
 
 void MainWindow::announceBottomCards() {
@@ -3470,7 +3931,7 @@ void MainWindow::announceLastAction() {
         const auto pattern = PatternAnalyzer::analyze(
             state.lastPlayedCards, state.activePlayerCount);
         std::wstring text = playedCardsPlayerDisplayName(state.lastPlayedBy) + L"，";
-        text += CardTextFormatter::formatPlayedCards(pattern, state.lastPlayedCards);
+        text += CardTextFormatter::formatPlayedCards(pattern, state.lastPlayedCards, state.activePlayerCount);
         announce(text, AnnouncementCategory::System);
     } else if (!m_lastPlayedCardsText.empty()) {
         announce(m_lastPlayedCardsText, AnnouncementCategory::System);
@@ -3480,10 +3941,13 @@ void MainWindow::announceLastAction() {
 }
 
 void MainWindow::rememberLastAction(const CommandResult& result) {
+    if (m_gameMode == GameMode::AiBattle && m_aiBattleStatisticsRepo) {
+        m_aiBattleStatisticsRepo->recordPublicAction(m_engine.fullState());
+    }
     for (const auto& event : result.events) {
         if (event.type == GameEventType::CardsPlayed && !event.cards.empty()) {
             m_lastPlayedCardsText = playedCardsPlayerDisplayName(event.playerId) + L"，" +
-                CardTextFormatter::formatPlayedCards(event.pattern, event.cards);
+                CardTextFormatter::formatPlayedCards(event.pattern, event.cards, m_engine.fullState().activePlayerCount);
         }
     }
 
@@ -3508,7 +3972,21 @@ void MainWindow::handleFinishedResult(const CommandResult& result, int announcem
         showRoundResult();
     }
 
-    if (m_statisticsRepo) {
+    if (m_gameMode == GameMode::AiBattle && m_aiBattleStatisticsRepo) {
+        DataPaths::ensureDirectories();
+        m_aiBattleStatisticsRepo->recordRound(
+            round, m_engine.fullState(), m_aiBattleSettings);
+        m_aiBattleStatisticsRepo->save(DataPaths::aiBattleStatisticsFile());
+        m_aiBattleStatisticsRepo->recordRoundFinished(
+            DataPaths::aiBattleLogsDir(), round, m_engine.fullState(),
+            m_aiBattleSettings);
+        m_aiBattleStatisticsRepo->saveReplaySummary(
+            DataPaths::aiBattleReplaysDir(), round, m_engine.fullState(),
+            m_aiBattleSettings);
+        m_aiBattleStatisticsRepo->saveDetailedGame(
+            DataPaths::aiBattleReplaysDir() + QStringLiteral("/detailed"),
+            round, m_engine.fullState(), m_aiBattleSettings);
+    } else if (m_statisticsRepo) {
         DataPaths::ensureDirectories();
         m_statisticsRepo->recordRound(round, m_engine.fullState().players[0].role);
         m_statisticsRepo->save(DataPaths::statisticsFile());
@@ -3554,6 +4032,13 @@ void MainWindow::showRoundResult() {
 
 void MainWindow::returnToMainScreen() {
     if (m_aiTimer) m_aiTimer->stop();
+    if (m_pendingCloudRequest && m_aiService) {
+        m_aiService->cancel(m_pendingCloudRequest->requestId);
+        m_pendingCloudRequest.reset();
+    }
+    m_cloudTurnPaused = false;
+    if (m_retryCloudAction) m_retryCloudAction->setEnabled(false);
+    stopCloudWait();
     if (m_turnCountdownTimer) m_turnCountdownTimer->stop();
     if (m_countdownLabel) m_countdownLabel->setVisible(false);
     hideBiddingControls();
@@ -3568,9 +4053,31 @@ void MainWindow::returnToMainScreen() {
     refreshFromState();
 }
 
+bool MainWindow::landlordMustLeadFirstTurn() const {
+    const bool enabled = m_gameMode == GameMode::AiBattle
+        ? m_aiBattleSettings.landlordMustLeadFirstTurn
+        : m_settings.landlordMustLeadFirstTurn;
+    if (!enabled || m_engine.state().phase() != GamePhase::Playing) return false;
+    const auto& state = m_engine.fullState();
+    if (state.currentPlayer != PlayerId::Player1 ||
+        state.players[0].role != Role::Landlord ||
+        !TurnManager::isLeader(m_engine.state())) {
+        return false;
+    }
+    return std::none_of(state.actionHistory.begin(), state.actionHistory.end(),
+        [](const PublicActionRecord& action) {
+            return action.type == PublicActionType::Play ||
+                   action.type == PublicActionType::Pass;
+        });
+}
+
 void MainWindow::updateTurnCountdown(bool humanTurn) {
-    if (humanTurn && m_settings.autoPassEnabled) {
-        m_turnSecondsRemaining = m_settings.autoPassSeconds;
+    const bool autoPassEnabled = m_gameMode == GameMode::AiBattle
+        ? m_aiBattleSettings.autoPassEnabled : m_settings.autoPassEnabled;
+    const int autoPassSeconds = m_gameMode == GameMode::AiBattle
+        ? m_aiBattleSettings.autoPassSeconds : m_settings.autoPassSeconds;
+    if (humanTurn && autoPassEnabled && !landlordMustLeadFirstTurn()) {
+        m_turnSecondsRemaining = autoPassSeconds;
         m_turnCountdownTimer->start();
         m_countdownLabel->setVisible(true);
         m_countdownLabel->setText(QString::fromStdWString(L"本轮操作剩余")

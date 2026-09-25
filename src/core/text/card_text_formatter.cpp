@@ -146,7 +146,8 @@ std::wstring CardTextFormatter::formatSameRankSpeech(Rank rank, int count) {
 }
 
 std::wstring CardTextFormatter::formatPlayedCards(
-    const CardPattern& pattern, const std::vector<Card>& cards) {
+    const CardPattern& pattern, const std::vector<Card>& cards,
+    int activePlayerCount) {
     switch (pattern.type) {
     case CardPatternType::Triple:
         return L"三个" + formatRankSpeech(pattern.mainRank);
@@ -167,12 +168,12 @@ std::wstring CardTextFormatter::formatPlayedCards(
                (wings.empty() ? std::wstring{} : L"，带" + wings);
     }
     case CardPatternType::Gun:          return formatBomb(pattern, cards, L"枪");
-    case CardPatternType::KingBomb:     return L"王炸";
+    case CardPatternType::KingBomb:     return activePlayerCount == 4 ? L"双王枪毙" : L"王炸";
     case CardPatternType::Cannon:       return formatBomb(pattern, cards, L"炮");
     case CardPatternType::Rocket:       return formatBomb(pattern, cards, L"火箭");
     case CardPatternType::Missile:      return formatBomb(pattern, cards, L"导弹");
     case CardPatternType::SkyBlast:     return formatBomb(pattern, cards, L"天炸");
-    case CardPatternType::HeavenlyLord: return L"天尊";
+    case CardPatternType::HeavenlyLord: return activePlayerCount == 4 ? L"天尊无敌" : L"天尊";
     default:                            return formatCards(cards);
     }
 }

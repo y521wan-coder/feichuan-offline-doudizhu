@@ -26,7 +26,7 @@ QVector<SoundCatalogEntry> buildCatalog() {
              QString::fromUtf8(u8"新一局发牌时播放"));
     addEntry(entries, SoundCategory::YourTurn, QStringLiteral("your_turn"),
              QString::fromUtf8(u8"轮到你"), QStringLiteral("card_four/din.wav"),
-             QString::fromUtf8(u8"轮到玩家一时播放；该文件也被总音效开启提示共用"));
+             QString::fromUtf8(u8"轮到1时播放；该文件也被总音效开启提示共用"));
     addEntry(entries, SoundCategory::BiddingLandlord, QStringLiteral("landlord"),
              QString::fromUtf8(u8"地主确定"), QStringLiteral("card_four/robLandlord.wav"),
              QString::fromUtf8(u8"叫分结束并确定地主时播放"));
@@ -47,10 +47,10 @@ QVector<SoundCatalogEntry> buildCatalog() {
              QString::fromUtf8(u8"非法出牌、无效命令或操作失败时播放"));
     addEntry(entries, SoundCategory::GameResult, QStringLiteral("win"),
              QString::fromUtf8(u8"胜利"), QStringLiteral("card_four/win.wav"),
-             QString::fromUtf8(u8"玩家一所在阵营获胜时播放"));
+             QString::fromUtf8(u8"1所在阵营获胜时播放"));
     addEntry(entries, SoundCategory::GameResult, QStringLiteral("lose"),
              QString::fromUtf8(u8"失败"), QStringLiteral("card_four/fail.wav"),
-             QString::fromUtf8(u8"玩家一所在阵营失败时播放"));
+             QString::fromUtf8(u8"1所在阵营失败时播放"));
     addEntry(entries, SoundCategory::BackgroundMusic, QStringLiteral("music_background"),
              QString::fromUtf8(u8"背景音乐"), QStringLiteral("music/background.wav"),
              QString::fromUtf8(u8"背景或自动模式使用的音乐"));

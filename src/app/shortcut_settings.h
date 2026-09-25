@@ -35,6 +35,8 @@ enum class ShortcutAction {
     PlayerTwoOrBidTwo,
     PlayerThreeOrBidThree,
     PlayerFour,
+    PreviousWholeRankGroup,
+    NextWholeRankGroup,
     Count
 };
 

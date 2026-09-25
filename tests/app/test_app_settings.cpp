@@ -1,4 +1,7 @@
 #include <QtTest>
+
+#include <QJsonArray>
+
 #include "app/app_settings.h"
 using namespace fpdz;
 
@@ -10,6 +13,8 @@ private slots:
         QCOMPARE(settings.playerCount, PLAYER_COUNT);
         QCOMPARE(settings.autoPassEnabled, true);
         QCOMPARE(settings.autoPassSeconds, 30);
+        QCOMPARE(settings.landlordMustLeadFirstTurn, true);
+        QCOMPARE(AppSettings::fromJson(QJsonObject{}).landlordMustLeadFirstTurn, true);
         QCOMPARE(settings.aiDifficulty, static_cast<int>(AiDifficulty::Beginner));
         QCOMPARE(settings.humanVoice, PlayerVoice::Male);
         QCOMPARE(settings.backgroundMusicEnabled, false);
@@ -64,6 +69,7 @@ private slots:
         settings.playerCount = THREE_PLAYER_COUNT;
         settings.autoPassEnabled = false;
         settings.autoPassSeconds = 120;
+        settings.landlordMustLeadFirstTurn = false;
         settings.aiDifficulty = static_cast<int>(AiDifficulty::Advanced);
         settings.humanVoice = PlayerVoice::Female;
         settings.backgroundMusicEnabled = true;
@@ -85,6 +91,7 @@ private slots:
         QCOMPARE(restored.playerCount, THREE_PLAYER_COUNT);
         QCOMPARE(restored.autoPassEnabled, false);
         QCOMPARE(restored.autoPassSeconds, 120);
+        QCOMPARE(restored.landlordMustLeadFirstTurn, false);
         QCOMPARE(restored.aiDifficulty, static_cast<int>(AiDifficulty::Advanced));
         QCOMPARE(restored.humanVoice, PlayerVoice::Female);
         QCOMPARE(restored.backgroundMusicEnabled, true);
@@ -113,7 +120,21 @@ private slots:
         settings.normalize();
 
         QCOMPARE(settings.playerNames[0], QString::fromUtf8(u8"东家"));
-        QCOMPARE(settings.playerNames[1], QString::fromUtf8(u8"玩家二"));
+        QCOMPARE(settings.playerNames[1], QString::fromUtf8(u8"2"));
+    }
+
+    void testLegacyDefaultPlayerNamesMigrateToDigits() {
+        QJsonObject json;
+        json["playerNames"] = QJsonArray{QString::fromUtf8(u8"玩家一"),
+                                         QString::fromUtf8(u8"小李"),
+                                         QString::fromUtf8(u8"玩家三"),
+                                         QString::fromUtf8(u8"玩家四")};
+
+        const AppSettings restored = AppSettings::fromJson(json);
+        QCOMPARE(restored.playerNames[0], QString::fromUtf8(u8"1"));
+        QCOMPARE(restored.playerNames[1], QString::fromUtf8(u8"小李"));
+        QCOMPARE(restored.playerNames[2], QString::fromUtf8(u8"3"));
+        QCOMPARE(restored.playerNames[3], QString::fromUtf8(u8"4"));
     }
 
     void testOutOfRangeDifficultyClamps() {

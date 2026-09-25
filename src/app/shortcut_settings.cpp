@@ -184,6 +184,8 @@ ShortcutBinding ShortcutSettings::defaultBinding(ShortcutAction action) {
     case PlayerTwoOrBidTwo: return {Qt::Key_2, Qt::NoModifier};
     case PlayerThreeOrBidThree: return {Qt::Key_3, Qt::NoModifier};
     case PlayerFour: return {Qt::Key_4, Qt::NoModifier};
+    case PreviousWholeRankGroup: return {Qt::Key_Left, Qt::ControlModifier};
+    case NextWholeRankGroup: return {Qt::Key_Right, Qt::ControlModifier};
     case Count: break;
     }
     return {};
@@ -217,6 +219,8 @@ QString ShortcutSettings::actionId(ShortcutAction action) {
     case PlayerTwoOrBidTwo: return QStringLiteral("playerTwoOrBidTwo");
     case PlayerThreeOrBidThree: return QStringLiteral("playerThreeOrBidThree");
     case PlayerFour: return QStringLiteral("playerFour");
+    case PreviousWholeRankGroup: return QStringLiteral("previousWholeRankGroup");
+    case NextWholeRankGroup: return QStringLiteral("nextWholeRankGroup");
     case Count: break;
     }
     return {};
@@ -246,10 +250,12 @@ QString ShortcutSettings::actionName(ShortcutAction action) {
     case PlayCards: return QString::fromUtf8(u8"出牌");
     case Pass: return QString::fromUtf8(u8"过牌");
     case BidZero: return QString::fromUtf8(u8"叫分时不叫");
-    case PlayerOneOrBidOne: return QString::fromUtf8(u8"叫一分或查询玩家一");
-    case PlayerTwoOrBidTwo: return QString::fromUtf8(u8"叫二分或查询玩家二");
-    case PlayerThreeOrBidThree: return QString::fromUtf8(u8"叫三分或查询玩家三");
-    case PlayerFour: return QString::fromUtf8(u8"查询玩家四");
+    case PlayerOneOrBidOne: return QString::fromUtf8(u8"叫一分或查询1");
+    case PlayerTwoOrBidTwo: return QString::fromUtf8(u8"叫二分或查询2");
+    case PlayerThreeOrBidThree: return QString::fromUtf8(u8"叫三分或查询3");
+    case PlayerFour: return QString::fromUtf8(u8"查询4");
+    case PreviousWholeRankGroup: return QString::fromUtf8(u8"浏览上一组多张同点牌");
+    case NextWholeRankGroup: return QString::fromUtf8(u8"浏览下一组多张同点牌");
     case Count: break;
     }
     return {};

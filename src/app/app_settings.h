@@ -45,6 +45,7 @@ struct AppSettings {
     bool animationEnabled = false;
     bool autoPassEnabled = true;
     int autoPassSeconds = 30;
+    bool landlordMustLeadFirstTurn = true;
     bool automaticUpdateChecks = true;
     QString lastAutomaticUpdateCheckDate;
     QString ignoredUpdateVersion;

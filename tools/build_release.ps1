@@ -8,10 +8,13 @@ $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $gameName = -join @([char]0x98DE, [char]0x8239, [char]0x6597, [char]0x5730,
     [char]0x4E3B)
 $updaterName = $gameName + (-join @([char]0x66F4, [char]0x65B0, [char]0x5668))
+$aiServiceName = $gameName + 'AI' + (-join @([char]0x670D, [char]0x52A1))
 $gameFileName = $gameName + '.exe'
 $updaterFileName = $updaterName + '.exe'
+$aiServiceFileName = $aiServiceName + '.exe'
 $releaseExe = Join-Path $root (Join-Path 'build\release-x64' $gameFileName)
 $updaterExe = Join-Path $root (Join-Path 'build\release-x64' $updaterFileName)
+$aiServiceExe = Join-Path $root (Join-Path 'build\release-x64' $aiServiceFileName)
 $nvdaControllerDll = Join-Path $root 'build\release-x64\nvdaControllerClient.dll'
 $nvdaControllerLicense = Join-Path $root 'build\release-x64\licenses\NVDA-Controller-Client-LGPL-2.1.txt'
 $portable = Join-Path $root 'artifacts\portable-current'
@@ -43,6 +46,7 @@ if ($Deploy) {
     if ($running) { throw 'Close the game before generating the portable package.' }
     if (-not (Test-Path -LiteralPath $releaseExe)) { throw "Missing release executable: $releaseExe" }
     if (-not (Test-Path -LiteralPath $updaterExe)) { throw "Missing updater executable: $updaterExe" }
+    if (-not (Test-Path -LiteralPath $aiServiceExe)) { throw "Missing AI service executable: $aiServiceExe" }
     if (-not (Test-Path -LiteralPath $nvdaControllerDll)) { throw "Missing NVDA Controller Client: $nvdaControllerDll" }
     if (-not (Test-Path -LiteralPath $nvdaControllerLicense)) { throw "Missing NVDA Controller Client license: $nvdaControllerLicense" }
 
@@ -58,6 +62,7 @@ if ($Deploy) {
     New-Item -ItemType Directory -Path $resolvedPortable -Force | Out-Null
     Copy-Item -LiteralPath $releaseExe -Destination $resolvedPortable -Force
     Copy-Item -LiteralPath $updaterExe -Destination $resolvedPortable -Force
+    Copy-Item -LiteralPath $aiServiceExe -Destination $resolvedPortable -Force
     Copy-Item -LiteralPath $nvdaControllerDll -Destination $resolvedPortable -Force
     New-Item -ItemType Directory -Path (Join-Path $resolvedPortable 'licenses') -Force | Out-Null
     Copy-Item -LiteralPath $nvdaControllerLicense -Destination (Join-Path $resolvedPortable 'licenses') -Force
@@ -71,6 +76,8 @@ if ($Deploy) {
     if ($LASTEXITCODE -ne 0) { throw "windeployqt failed for the game with exit code $LASTEXITCODE" }
     & $windeployqt --release --dir $resolvedPortable (Join-Path $resolvedPortable $updaterFileName)
     if ($LASTEXITCODE -ne 0) { throw "windeployqt failed for the updater with exit code $LASTEXITCODE" }
+    & $windeployqt --release --dir $resolvedPortable (Join-Path $resolvedPortable $aiServiceFileName)
+    if ($LASTEXITCODE -ne 0) { throw "windeployqt failed for the AI service with exit code $LASTEXITCODE" }
 }
 
 if ($Package) {
@@ -89,6 +96,7 @@ if ($Package) {
     New-Item -ItemType Directory -Path $resolvedStage -Force | Out-Null
     Copy-Item -LiteralPath $releaseExe -Destination $resolvedStage -Force
     Copy-Item -LiteralPath $updaterExe -Destination $resolvedStage -Force
+    Copy-Item -LiteralPath $aiServiceExe -Destination $resolvedStage -Force
     Copy-Item -LiteralPath $nvdaControllerDll -Destination $resolvedStage -Force
     New-Item -ItemType Directory -Path (Join-Path $resolvedStage 'licenses') -Force | Out-Null
     Copy-Item -LiteralPath $nvdaControllerLicense -Destination (Join-Path $resolvedStage 'licenses') -Force
@@ -103,6 +111,8 @@ if ($Package) {
     if ($LASTEXITCODE -ne 0) { throw "windeployqt failed for the game with exit code $LASTEXITCODE" }
     & $windeployqt --release --no-translations --dir $resolvedStage (Join-Path $resolvedStage $updaterFileName)
     if ($LASTEXITCODE -ne 0) { throw "windeployqt failed for the updater with exit code $LASTEXITCODE" }
+    & $windeployqt --release --no-translations --dir $resolvedStage (Join-Path $resolvedStage $aiServiceFileName)
+    if ($LASTEXITCODE -ne 0) { throw "windeployqt failed for the AI service with exit code $LASTEXITCODE" }
 
     New-Item -ItemType Directory -Path $dist -Force | Out-Null
     & $iscc "/DAppVersion=$version" "/DSourceDir=$resolvedStage" "/DOutputDir=$dist" $installerScript

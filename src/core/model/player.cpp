@@ -2,22 +2,24 @@
 
 namespace fpdz {
 
+// 玩家称呼统一用数字 1～4，避免“玩家一、玩家二……”啰嗦；
+// 用户自定义名称由 AppSettings::playerNames 覆盖。
 std::wstring playerIdDisplayName(PlayerId id) {
     switch (id) {
-        case PlayerId::Player1: return L"玩家一";
-        case PlayerId::Player2: return L"玩家二";
-        case PlayerId::Player3: return L"玩家三";
-        case PlayerId::Player4: return L"玩家四";
+        case PlayerId::Player1: return L"1";
+        case PlayerId::Player2: return L"2";
+        case PlayerId::Player3: return L"3";
+        case PlayerId::Player4: return L"4";
     }
     return L"未知";
 }
 
 std::wstring seatDisplayName(SeatPosition seat) {
     switch (seat) {
-        case SeatPosition::East:  return L"玩家一/我";
-        case SeatPosition::South: return L"玩家二/下家";
-        case SeatPosition::West:  return L"玩家三/对家";
-        case SeatPosition::North: return L"玩家四/上家";
+        case SeatPosition::East:  return L"1/我";
+        case SeatPosition::South: return L"2/下家";
+        case SeatPosition::West:  return L"3/对家";
+        case SeatPosition::North: return L"4/上家";
     }
     return L"未知";
 }

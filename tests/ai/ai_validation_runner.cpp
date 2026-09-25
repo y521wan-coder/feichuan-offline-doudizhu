@@ -3,7 +3,11 @@
 #include <iostream>
 #include <string>
 
+#include <QJsonDocument>
+#include <QSet>
+
 #include "ai/standard_ai.h"
+#include "ai/ai_decision_request.h"
 #include "core/engine/game_engine.h"
 #include "core/rules/pattern_analyzer.h"
 
@@ -23,13 +27,185 @@ struct Summary {
     int farmerWins = 0;
     std::array<int, PLAYER_COUNT> winningSeats{};
     double maximumDecisionMs = 0.0;
+    int cloudRequests = 0;
+    int catalogFailures = 0;
+    int maximumCatalogActions = 0;
+    int trimmedCatalogs = 0;
 };
+
+bool validateObservation(const AiObservation& observation);
+
+QString validationMoveSignature(const LegalMove& move) {
+    std::array<int, RANK_COUNT> counts{};
+    for (const auto& card : move.cards) ++counts[rankWeight(card.rank())];
+    QString result = QStringLiteral("%1:%2:%3:")
+        .arg(static_cast<int>(move.pattern.type))
+        .arg(rankWeight(move.pattern.mainRank))
+        .arg(move.pattern.mainLength);
+    for (int index = 0; index < RANK_COUNT; ++index) {
+        if (counts[static_cast<std::size_t>(index)] > 0) {
+            result += QStringLiteral("%1x%2,").arg(index).arg(counts[index]);
+        }
+    }
+    return result;
+}
+
+bool validateReducedCatalog(const AiDecisionRequest& request,
+                            const AiObservation& observation) {
+    QSet<QString> kept;
+    QSet<QString> keptGroups;
+    bool keptPass = false;
+    for (const auto& action : request.actions) {
+        kept.insert(action.semanticSignature);
+        if (action.command.type == GameCommandType::Pass) keptPass = true;
+        if (action.command.type == GameCommandType::PlayCards) {
+            keptGroups.insert(QStringLiteral("%1:%2")
+                .arg(action.description.value("pattern").toInt())
+                .arg(action.description.value("main_rank").toInt()));
+        }
+    }
+    const bool leader = observation.publicState.lastPlayedCards.empty();
+    if (!leader && !keptPass) return false;
+    std::optional<CardPattern> lastPattern;
+    if (!leader) {
+        lastPattern = PatternAnalyzer::analyze(observation.publicState.lastPlayedCards,
+                                               observation.publicState.activePlayerCount);
+    }
+    const auto moves = LegalMoveGenerator::generateLegalMoves(
+        observation.ownHand, lastPattern, observation.publicState.activePlayerCount);
+    int landlordIndex = -1;
+    for (int index = 0; index < observation.publicState.activePlayerCount; ++index) {
+        if (observation.publicState.players[index].role == Role::Landlord) {
+            landlordIndex = index;
+            break;
+        }
+    }
+    const int nextPlayer = (static_cast<int>(observation.playerId) + 1) %
+                           observation.publicState.activePlayerCount;
+    const bool landlordCanWinNext = landlordIndex == nextPlayer &&
+        observation.publicState.players[landlordIndex].remainingCards == 1;
+    for (const auto& move : moves) {
+        const QString signature = validationMoveSignature(move);
+        const QString group = QStringLiteral("%1:%2")
+            .arg(static_cast<int>(move.pattern.type))
+            .arg(rankWeight(move.pattern.mainRank));
+        if (!keptGroups.contains(group)) return false;
+        if ((move.pattern.isBomb() ||
+             static_cast<int>(move.cards.size()) == observation.ownHand.size()) &&
+            !kept.contains(signature)) return false;
+        if (landlordCanWinNext) {
+            const auto responses = LegalMoveGenerator::generateLegalMoves(
+                observation.fullInformation.allHands[landlordIndex], move.pattern,
+                observation.publicState.activePlayerCount);
+            if (responses.empty() && !kept.contains(signature)) return false;
+        }
+    }
+    const GameCommand preferred = StandardAiPlayer(AiDifficulty::Advanced)
+        .decidePlay(observation);
+    auto normalized = [](std::vector<CardId> ids) {
+        std::sort(ids.begin(), ids.end());
+        return ids;
+    };
+    return std::any_of(request.actions.begin(), request.actions.end(),
+        [&](const AiLegalAction& action) {
+            return action.command.type == preferred.type &&
+                   normalized(action.command.cardIds) == normalized(preferred.cardIds);
+        });
+}
 
 AiDifficulty parseDifficulty(const std::string& value) {
     const int level = std::stoi(value);
     if (level <= 0) return AiDifficulty::Beginner;
     if (level == 1) return AiDifficulty::Intermediate;
     return AiDifficulty::Advanced;
+}
+
+const AiLegalAction* chooseFakeModelAction(const AiDecisionRequest& request,
+                                           int ownCardCount) {
+    const AiLegalAction* firstPlayable = nullptr;
+    for (const auto& action : request.actions) {
+        if (action.command.type != GameCommandType::PlayCards) continue;
+        if (static_cast<int>(action.command.cardIds.size()) == ownCardCount) {
+            return &action;
+        }
+        if (!firstPlayable) firstPlayable = &action;
+    }
+    if (firstPlayable) return firstPlayable;
+    return request.actions.isEmpty() ? nullptr : &request.actions.back();
+}
+
+bool runCloudCatalogGame(int playerCount, uint64_t seed, Summary& summary) {
+    StandardAiPlayer human(AiDifficulty::Advanced);
+    GameEngine engine;
+    GameCommand start;
+    start.type = GameCommandType::StartGame;
+    start.randomSeed = seed;
+    start.playerCount = playerCount;
+    if (!engine.execute(start).success) {
+        ++summary.illegal;
+        return false;
+    }
+    int actionsRemaining = 2000;
+    while (actionsRemaining-- > 0 && engine.state().phase() != GamePhase::Finished) {
+        const GamePhase phase = engine.state().phase();
+        const PlayerId player = engine.fullState().currentPlayer;
+        const AiObservation observation = makeAiObservation(engine.state(), player);
+        if (!validateObservation(observation)) ++summary.duplicateDeals;
+        GameCommand command;
+        if (player == PlayerId::Player1) {
+            command = phase == GamePhase::Bidding
+                ? human.decideBid(observation) : human.decidePlay(observation);
+        } else {
+            SeatControllerConfig controller;
+            controller.kind = SeatControllerKind::CloudAi;
+            controller.credentialId = QStringLiteral("fake");
+            controller.model = QStringLiteral("deterministic-fake-model");
+            const QString requestId = QStringLiteral("%1-%2")
+                .arg(seed).arg(engine.fullState().eventSequence);
+            const AiDecisionRequest request = AiActionCatalog::create(
+                engine.state(), player, controller, requestId);
+            ++summary.cloudRequests;
+            summary.maximumCatalogActions = std::max(
+                summary.maximumCatalogActions, static_cast<int>(request.actions.size()));
+            if (request.actions.size() == AI_MAX_ACTIONS) ++summary.trimmedCatalogs;
+            if (request.actions.isEmpty() || request.actions.size() > AI_MAX_ACTIONS ||
+                QJsonDocument(request.toServiceJson()).toJson(QJsonDocument::Compact).size() >
+                    AI_MAX_MESSAGE_BYTES ||
+                request.gameId != engine.state().gameId() ||
+                request.eventSequence != engine.fullState().eventSequence ||
+                request.phase != phase || request.playerId != player) {
+                ++summary.catalogFailures;
+                return false;
+            }
+            if (request.actions.size() == AI_MAX_ACTIONS &&
+                !validateReducedCatalog(request, observation)) {
+                ++summary.catalogFailures;
+                return false;
+            }
+            const AiLegalAction* chosen = nullptr;
+            if (phase == GamePhase::Bidding) {
+                chosen = &request.actions.back();
+            } else if (phase == GamePhase::Playing) {
+                chosen = chooseFakeModelAction(request, observation.ownHand.size());
+            }
+            if (!chosen || AiActionCatalog::find(request, chosen->actionId) != chosen) {
+                ++summary.catalogFailures;
+                return false;
+            }
+            command = chosen->command;
+        }
+        if (!engine.execute(command).success) {
+            ++summary.illegal;
+            return false;
+        }
+    }
+    if (engine.state().phase() != GamePhase::Finished ||
+        !engine.fullState().roundResult.valid) {
+        ++summary.unfinished;
+        return false;
+    }
+    ++summary.completed;
+    return true;
 }
 
 const char* difficultyName(AiDifficulty difficulty) {
@@ -166,6 +342,23 @@ void printSummary(const std::string& label, const Summary& summary) {
               << " seat3=" << summary.winningSeats[2]
               << " seat4=" << summary.winningSeats[3]
               << " max_ms=" << summary.maximumDecisionMs << '\n';
+    std::cout << label
+              << " cloud_requests=" << summary.cloudRequests
+              << " catalog_failures=" << summary.catalogFailures
+              << " max_catalog_actions=" << summary.maximumCatalogActions
+              << " trimmed_catalogs=" << summary.trimmedCatalogs << '\n';
+}
+
+int runCloudStability(int playerCount, int games, int firstSeed) {
+    Summary summary;
+    summary.requested = games;
+    for (int offset = 0; offset < games; ++offset) {
+        runCloudCatalogGame(playerCount, static_cast<uint64_t>(firstSeed + offset), summary);
+    }
+    printSummary("CLOUD_STABILITY players=" + std::to_string(playerCount), summary);
+    return summary.completed == games && summary.illegal == 0 &&
+           summary.unfinished == 0 && summary.duplicateDeals == 0 &&
+           summary.catalogFailures == 0 ? 0 : 1;
 }
 
 int runStability(int playerCount, AiDifficulty difficulty,
@@ -238,6 +431,10 @@ int main(int argc, char** argv) {
         return runComparison(std::stoi(argv[2]), parseDifficulty(argv[3]),
                              parseDifficulty(argv[4]), std::stoi(argv[5]),
                              std::stoi(argv[6]));
+    }
+    if (mode == "cloud-stability" && argc == 5) {
+        return runCloudStability(std::stoi(argv[2]), std::stoi(argv[3]),
+                                 std::stoi(argv[4]));
     }
     std::cerr << "invalid arguments\n";
     return 2;

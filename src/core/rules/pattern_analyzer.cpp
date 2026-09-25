@@ -49,7 +49,7 @@ CardPattern PatternAnalyzer::analyze(const std::vector<Card>& cards,
         if (standardSingleDeckRules) {
             if (auto p = analyzeAirplaneWithSingles(cards, hist)) return *p;
         }
-        if (auto p = analyzeAirplaneWithPairs(cards, hist)) return *p;
+        if (auto p = analyzeAirplaneWithPairs(cards, hist, activePlayerCount)) return *p;
     }
     if (standardSingleDeckRules) {
         if (auto p = analyzeFourWithTwoSingles(cards, hist)) return *p;
@@ -283,7 +283,7 @@ std::optional<CardPattern> PatternAnalyzer::analyzeAirplaneWithSingles(const std
     return std::nullopt;
 }
 
-std::optional<CardPattern> PatternAnalyzer::analyzeAirplaneWithPairs(const std::vector<Card>& cards, const RankHistogram& hist) {
+std::optional<CardPattern> PatternAnalyzer::analyzeAirplaneWithPairs(const std::vector<Card>& cards, const RankHistogram& hist, int activePlayerCount) {
     int n = static_cast<int>(cards.size());
     if (n < RuleSet::MIN_AIRPLANE_LENGTH * 5) return std::nullopt;
     if (n % 5 != 0) return std::nullopt;
@@ -307,6 +307,16 @@ std::optional<CardPattern> PatternAnalyzer::analyzeAirplaneWithPairs(const std::
             for (int j = 0; j < 3; ++j) {
                 tempHist.removeCard(r);
             }
+        }
+        if (activePlayerCount == PLAYER_COUNT) {
+            bool overlapsBody = false;
+            for (int i = 0; i < airplaneLen; ++i) {
+                if (tempHist.countOf(static_cast<Rank>(startWeight + i)) != 0) {
+                    overlapsBody = true;
+                    break;
+                }
+            }
+            if (overlapsBody) continue;
         }
         // Remaining should all be pairs
         bool allPairs = true;
