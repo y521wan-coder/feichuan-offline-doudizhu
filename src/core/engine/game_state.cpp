@@ -59,11 +59,13 @@ PublicGameSnapshot GameState::publicSnapshot() const {
 
 QJsonObject GameState::toJson() const {
     QJsonObject json;
-    json["schemaVersion"] = 4;
+    json["schemaVersion"] = 5;
     json["phase"] = static_cast<int>(m_phase);
     json["previousPhase"] = static_cast<int>(m_previousPhase);
-    json["gameId"] = static_cast<qint64>(m_fullState.gameId);
-    json["randomSeed"] = static_cast<qint64>(m_fullState.randomSeed);
+    // Decimal strings preserve the entire uint64 range across JSON parsers.
+    // fromJson also accepts the numeric fields written by older saves.
+    json["gameId"] = QString::number(m_fullState.gameId);
+    json["randomSeed"] = QString::number(m_fullState.randomSeed);
     json["deterministicRandom"] = m_fullState.deterministicRandom;
     json["activePlayerCount"] = m_fullState.activePlayerCount;
     json["currentPlayer"] = static_cast<int>(m_fullState.currentPlayer);
@@ -74,11 +76,12 @@ QJsonObject GameState::toJson() const {
     json["highestBid"] = m_fullState.highestBid;
     json["biddingStartPlayer"] = static_cast<int>(m_fullState.biddingStartPlayer);
     json["biddingPlayerCount"] = m_fullState.biddingPlayerCount;
+    json["consecutiveRedeals"] = m_fullState.consecutiveRedeals;
     json["baseScore"] = m_fullState.baseScore;
     json["currentMultiplier"] = static_cast<qint64>(m_fullState.currentMultiplier);
     json["bombCount"] = m_fullState.bombCount;
     json["bottomCardsRevealed"] = m_fullState.bottomCardsRevealed;
-    json["eventSequence"] = static_cast<qint64>(m_fullState.eventSequence);
+    json["eventSequence"] = QString::number(m_fullState.eventSequence);
     json["springDetected"] = m_fullState.springDetected;
     json["antiSpringDetected"] = m_fullState.antiSpringDetected;
     QJsonObject roundResult;
@@ -107,6 +110,7 @@ QJsonObject GameState::toJson() const {
         playerJson["role"] = static_cast<int>(p.role);
         playerJson["bidScore"] = p.bidScore;
         playerJson["hasPassedBid"] = p.hasPassedBid;
+        playerJson["lastActionWasPass"] = p.lastActionWasPass;
         playerJson["isHuman"] = p.isHuman;
         playerJson["cardsPlayedCount"] = p.cardsPlayedCount;
         playerJson["hasPlayedThisRound"] = p.hasPlayedThisRound;
@@ -128,7 +132,7 @@ QJsonObject GameState::toJson() const {
         actionJson["type"] = static_cast<int>(action.type);
         actionJson["playerId"] = static_cast<int>(action.playerId);
         actionJson["bidValue"] = action.bidValue;
-        actionJson["sequence"] = static_cast<qint64>(action.sequence);
+        actionJson["sequence"] = QString::number(action.sequence);
         QJsonArray cards;
         for (const auto& card : action.cards) cards.append(static_cast<int>(card.id()));
         actionJson["cards"] = cards;
@@ -172,6 +176,7 @@ GameState GameState::fromJson(const QJsonObject& json) {
     state.m_fullState.highestBid = json["highestBid"].toInt();
     state.m_fullState.biddingStartPlayer = static_cast<PlayerId>(json["biddingStartPlayer"].toInt());
     state.m_fullState.biddingPlayerCount = json["biddingPlayerCount"].toInt();
+    state.m_fullState.consecutiveRedeals = json["consecutiveRedeals"].toInt(0);
     state.m_fullState.baseScore = json["baseScore"].toInt();
     state.m_fullState.currentMultiplier = json["currentMultiplier"].toVariant().toULongLong();
     state.m_fullState.bombCount = json["bombCount"].toInt();
@@ -179,6 +184,7 @@ GameState GameState::fromJson(const QJsonObject& json) {
     state.m_fullState.eventSequence = json["eventSequence"].toVariant().toULongLong();
     state.m_fullState.springDetected = json["springDetected"].toBool(false);
     state.m_fullState.antiSpringDetected = json["antiSpringDetected"].toBool(false);
+    state.m_ruleSet.ruleVersion = json["ruleVersion"].toInt(RuleSet::VERSION);
     const auto roundResult = json["roundResult"].toObject();
     state.m_fullState.roundResult.valid = roundResult["valid"].toBool(false);
     state.m_fullState.roundResult.winner = static_cast<PlayerId>(roundResult["winner"].toInt());
@@ -204,6 +210,7 @@ GameState GameState::fromJson(const QJsonObject& json) {
         p.role = static_cast<Role>(playerJson["role"].toInt());
         p.bidScore = playerJson["bidScore"].toInt();
         p.hasPassedBid = playerJson["hasPassedBid"].toBool();
+        p.lastActionWasPass = playerJson["lastActionWasPass"].toBool(false);
         p.isHuman = playerJson["isHuman"].toBool();
         p.cardsPlayedCount = playerJson["cardsPlayedCount"].toInt();
         p.hasPlayedThisRound = playerJson["hasPlayedThisRound"].toBool();

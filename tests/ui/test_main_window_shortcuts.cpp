@@ -79,11 +79,13 @@ private slots:
 
         auto* offline = window.offlineButton();
         auto* aiBattle = window.aiBattleButton();
+        auto* online = window.onlineButton();
         QVERIFY(offline);
         QVERIFY(aiBattle);
+        QVERIFY(online);
         QTRY_VERIFY(offline->hasFocus());
         QVERIFY(offline->accessibleName().startsWith(
-            QString::fromUtf8(u8"纯单机版模式，第一项，共两项")));
+            QString::fromUtf8(u8"纯单机版模式，第一项，共三项")));
         QVERIFY(offline->accessibleDescription().contains(QString::fromUtf8(u8"不会启动AI服务")));
 
         QTestAccessibility::initialize();
@@ -101,8 +103,12 @@ private slots:
         QCOMPARE(explicitAnnouncements, 0);
         QTestAccessibility::cleanup();
         QTest::keyClick(aiBattle, Qt::Key_Tab);
+        QTRY_VERIFY(online->hasFocus());
+        QTest::keyClick(online, Qt::Key_Tab);
         QTRY_VERIFY(offline->hasFocus());
         QTest::keyClick(offline, Qt::Key_Tab, Qt::ShiftModifier);
+        QTRY_VERIFY(online->hasFocus());
+        QTest::keyClick(online, Qt::Key_Tab, Qt::ShiftModifier);
         QTRY_VERIFY(aiBattle->hasFocus());
     }
 
@@ -121,6 +127,11 @@ private slots:
         QTest::keyClick(window.aiBattleButton(), Qt::Key_Return);
         QCOMPARE(selected.count(), 1);
         QCOMPARE(qvariant_cast<GameMode>(selected.takeFirst().at(0)), GameMode::AiBattle);
+
+        window.onlineButton()->setFocus();
+        QTest::keyClick(window.onlineButton(), Qt::Key_Return);
+        QCOMPARE(selected.count(), 1);
+        QCOMPARE(qvariant_cast<GameMode>(selected.takeFirst().at(0)), GameMode::Online);
     }
 
     void testOfflineWindowNeverCreatesAiServiceClient() {

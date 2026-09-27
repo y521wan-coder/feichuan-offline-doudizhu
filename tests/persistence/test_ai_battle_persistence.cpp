@@ -7,6 +7,8 @@
 #include <QTemporaryDir>
 
 #include "persistence/ai_battle_statistics_repository.h"
+#include "persistence/save_repository.h"
+#include "core/engine/game_engine.h"
 
 using namespace fpdz;
 
@@ -185,6 +187,61 @@ private slots:
         QVERIFY(!gameIds.contains(1));
         QVERIFY(gameIds.contains(2));
         QVERIFY(gameIds.contains(51));
+    }
+
+    void testVersion22StyleOfflineSaveLoadsAndContinues() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        GameEngine original;
+        GameCommand start;
+        start.type = GameCommandType::StartGame;
+        start.playerCount = THREE_PLAYER_COUNT;
+        start.randomSeed = 20260927;
+        QVERIFY(original.execute(start).success);
+
+        // SaveRepository's existing on-disk wrapper is schema 1. The 2.2
+        // embedded GameState omitted these newly restored fields.
+        QJsonObject oldSave = original.state().toJson();
+        oldSave["schemaVersion"] = 1;
+        oldSave["gameId"] = qint64(original.state().gameId());
+        oldSave["randomSeed"] = qint64(*start.randomSeed);
+        oldSave["eventSequence"] = qint64(original.state().fullState().eventSequence);
+        oldSave.remove("consecutiveRedeals");
+        oldSave.remove("ruleVersion");
+        QJsonArray players = oldSave["players"].toArray();
+        for (int i = 0; i < players.size(); ++i) {
+            QJsonObject player = players[i].toObject();
+            player.remove("lastActionWasPass");
+            players[i] = player;
+        }
+        oldSave["players"] = players;
+        const QString path = directory.filePath(QStringLiteral("old-autosave.json"));
+        QFile file(path);
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        QVERIFY(file.write(QJsonDocument(oldSave).toJson()) > 0);
+        file.close();
+
+        SaveRepository repository;
+        GameState loaded;
+        QVERIFY(repository.loadGame(path, loaded));
+        QCOMPARE(loaded.phase(), original.state().phase());
+        QCOMPARE(loaded.fullState().activePlayerCount, THREE_PLAYER_COUNT);
+        QCOMPARE(loaded.fullState().currentPlayer, original.state().fullState().currentPlayer);
+        QCOMPARE(loaded.fullState().bottomCards.size(),
+                 original.state().fullState().bottomCards.size());
+        for (int i = 0; i < THREE_PLAYER_COUNT; ++i)
+            QCOMPARE(loaded.fullState().players[i].hand.cards(),
+                     original.state().fullState().players[i].hand.cards());
+
+        GameEngine resumed;
+        QVERIFY(resumed.restoreState(loaded));
+        GameCommand bid;
+        bid.type = GameCommandType::Bid;
+        bid.playerId = loaded.fullState().currentPlayer;
+        bid.bidValue = 1;
+        QVERIFY(original.execute(bid).success);
+        QVERIFY(resumed.execute(bid).success);
+        QCOMPARE(resumed.state().toJson(), original.state().toJson());
     }
 };
 

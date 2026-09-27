@@ -1,0 +1,22 @@
+{
+  "duration_seconds": 1846.6,
+  "connected_players": 100,
+  "rooms": 38,
+  "actions": 31198,
+  "automatic_steps_requested": 3145,
+  "rounds_started": 1009,
+  "stale_races_rejected": 4,
+  "chat_messages_sent": 1026,
+  "batch_reconnections": 10,
+  "invitations_sent": 300,
+  "requests": 91691,
+  "confirmation_p50_ms": 174.03,
+  "confirmation_p95_ms": 191.26,
+  "confirmation_max_ms": 945.74,
+  "state_change_requests": 29166,
+  "state_change_p95_ms": 193.27,
+  "gameplay_p95_ms": 192.31,
+  "account_auth_p95_ms": 801.8,
+  "join_p95_ms": 603.02,
+  "start_p95_ms": 198.74
+}

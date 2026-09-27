@@ -15,6 +15,7 @@ public:
 
     QPushButton* offlineButton() const { return m_offlineButton; }
     QPushButton* aiBattleButton() const { return m_aiBattleButton; }
+    QPushButton* onlineButton() const { return m_onlineButton; }
 
 signals:
     void modeSelected(fpdz::GameMode mode);
@@ -25,6 +26,7 @@ protected:
 private:
     QPushButton* m_offlineButton = nullptr;
     QPushButton* m_aiBattleButton = nullptr;
+    QPushButton* m_onlineButton = nullptr;
 };
 
 } // namespace fpdz

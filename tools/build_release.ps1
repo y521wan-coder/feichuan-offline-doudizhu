@@ -9,12 +9,15 @@ $gameName = -join @([char]0x98DE, [char]0x8239, [char]0x6597, [char]0x5730,
     [char]0x4E3B)
 $updaterName = $gameName + (-join @([char]0x66F4, [char]0x65B0, [char]0x5668))
 $aiServiceName = $gameName + 'AI' + (-join @([char]0x670D, [char]0x52A1))
+$onlineName = $gameName + (-join @([char]0x5728, [char]0x7EBF, [char]0x7248))
 $gameFileName = $gameName + '.exe'
 $updaterFileName = $updaterName + '.exe'
 $aiServiceFileName = $aiServiceName + '.exe'
+$onlineFileName = $onlineName + '.exe'
 $releaseExe = Join-Path $root (Join-Path 'build\release-x64' $gameFileName)
 $updaterExe = Join-Path $root (Join-Path 'build\release-x64' $updaterFileName)
 $aiServiceExe = Join-Path $root (Join-Path 'build\release-x64' $aiServiceFileName)
+$onlineExe = Join-Path $root (Join-Path 'build\release-x64' $onlineFileName)
 $nvdaControllerDll = Join-Path $root 'build\release-x64\nvdaControllerClient.dll'
 $nvdaControllerLicense = Join-Path $root 'build\release-x64\licenses\NVDA-Controller-Client-LGPL-2.1.txt'
 $portable = Join-Path $root 'artifacts\portable-current'
@@ -25,6 +28,15 @@ $buildScript = Join-Path $PSScriptRoot 'build.ps1'
 $iscc = 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe'
 $vcRedist = 'C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\VC\Redist\MSVC\v145\vc_redist.x64.exe'
 $windeployqt = Join-Path $root 'Qt\6.8.3\msvc2022_64\bin\windeployqt.exe'
+
+function Assert-OnlineRuntime([string]$directory) {
+    foreach ($relativePath in @('Qt6Network.dll', 'Qt6WebSockets.dll', 'tls\qschannelbackend.dll')) {
+        $dependency = Join-Path $directory $relativePath
+        if (-not (Test-Path -LiteralPath $dependency)) {
+            throw "Missing online runtime dependency: $dependency"
+        }
+    }
+}
 
 $installerScripts = @(Get-ChildItem -LiteralPath (Join-Path $root 'installer') -Filter '*.iss' -File)
 if ($installerScripts.Count -ne 1) {
@@ -47,6 +59,7 @@ if ($Deploy) {
     if (-not (Test-Path -LiteralPath $releaseExe)) { throw "Missing release executable: $releaseExe" }
     if (-not (Test-Path -LiteralPath $updaterExe)) { throw "Missing updater executable: $updaterExe" }
     if (-not (Test-Path -LiteralPath $aiServiceExe)) { throw "Missing AI service executable: $aiServiceExe" }
+    if (-not (Test-Path -LiteralPath $onlineExe)) { throw "Missing online executable: $onlineExe" }
     if (-not (Test-Path -LiteralPath $nvdaControllerDll)) { throw "Missing NVDA Controller Client: $nvdaControllerDll" }
     if (-not (Test-Path -LiteralPath $nvdaControllerLicense)) { throw "Missing NVDA Controller Client license: $nvdaControllerLicense" }
 
@@ -63,6 +76,7 @@ if ($Deploy) {
     Copy-Item -LiteralPath $releaseExe -Destination $resolvedPortable -Force
     Copy-Item -LiteralPath $updaterExe -Destination $resolvedPortable -Force
     Copy-Item -LiteralPath $aiServiceExe -Destination $resolvedPortable -Force
+    Copy-Item -LiteralPath $onlineExe -Destination $resolvedPortable -Force
     Copy-Item -LiteralPath $nvdaControllerDll -Destination $resolvedPortable -Force
     New-Item -ItemType Directory -Path (Join-Path $resolvedPortable 'licenses') -Force | Out-Null
     Copy-Item -LiteralPath $nvdaControllerLicense -Destination (Join-Path $resolvedPortable 'licenses') -Force
@@ -78,6 +92,9 @@ if ($Deploy) {
     if ($LASTEXITCODE -ne 0) { throw "windeployqt failed for the updater with exit code $LASTEXITCODE" }
     & $windeployqt --release --dir $resolvedPortable (Join-Path $resolvedPortable $aiServiceFileName)
     if ($LASTEXITCODE -ne 0) { throw "windeployqt failed for the AI service with exit code $LASTEXITCODE" }
+    & $windeployqt --release --dir $resolvedPortable (Join-Path $resolvedPortable $onlineFileName)
+    if ($LASTEXITCODE -ne 0) { throw "windeployqt failed for the online program with exit code $LASTEXITCODE" }
+    Assert-OnlineRuntime $resolvedPortable
 }
 
 if ($Package) {
@@ -97,6 +114,7 @@ if ($Package) {
     Copy-Item -LiteralPath $releaseExe -Destination $resolvedStage -Force
     Copy-Item -LiteralPath $updaterExe -Destination $resolvedStage -Force
     Copy-Item -LiteralPath $aiServiceExe -Destination $resolvedStage -Force
+    Copy-Item -LiteralPath $onlineExe -Destination $resolvedStage -Force
     Copy-Item -LiteralPath $nvdaControllerDll -Destination $resolvedStage -Force
     New-Item -ItemType Directory -Path (Join-Path $resolvedStage 'licenses') -Force | Out-Null
     Copy-Item -LiteralPath $nvdaControllerLicense -Destination (Join-Path $resolvedStage 'licenses') -Force
@@ -113,6 +131,9 @@ if ($Package) {
     if ($LASTEXITCODE -ne 0) { throw "windeployqt failed for the updater with exit code $LASTEXITCODE" }
     & $windeployqt --release --no-translations --dir $resolvedStage (Join-Path $resolvedStage $aiServiceFileName)
     if ($LASTEXITCODE -ne 0) { throw "windeployqt failed for the AI service with exit code $LASTEXITCODE" }
+    & $windeployqt --release --no-translations --dir $resolvedStage (Join-Path $resolvedStage $onlineFileName)
+    if ($LASTEXITCODE -ne 0) { throw "windeployqt failed for the online program with exit code $LASTEXITCODE" }
+    Assert-OnlineRuntime $resolvedStage
 
     New-Item -ItemType Directory -Path $dist -Force | Out-Null
     & $iscc "/DAppVersion=$version" "/DSourceDir=$resolvedStage" "/DOutputDir=$dist" $installerScript

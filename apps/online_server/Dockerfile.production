@@ -1,0 +1,19 @@
+﻿FROM public.ecr.aws/debian/debian:12-slim@sha256:7c9dc0273b69d77bb30aa23f91be49648d4e6b797c6aad1ef669fc97918cf8f3 AS build
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential cmake ninja-build pkg-config libsodium-dev qt6-base-dev qt6-websockets-dev \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /work
+COPY src /work/src
+COPY apps/online_server /work/apps/online_server
+RUN cmake -S apps/online_server -B /work/build/online-linux -G Ninja \
+    -DCMAKE_BUILD_TYPE=Release && cmake --build /work/build/online-linux
+
+FROM public.ecr.aws/debian/debian:12-slim@sha256:7c9dc0273b69d77bb30aa23f91be49648d4e6b797c6aad1ef669fc97918cf8f3
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libqt6core6 libqt6network6 libqt6sql6 libqt6sql6-psql \
+    libqt6websockets6 libsodium23 ca-certificates && rm -rf /var/lib/apt/lists/* \
+    && useradd --system --uid 10001 --no-create-home online
+COPY --from=build /work/build/online-linux/feichuan-online-server /usr/local/bin/
+USER 10001:10001
+EXPOSE 19643
+ENTRYPOINT ["/usr/local/bin/feichuan-online-server"]

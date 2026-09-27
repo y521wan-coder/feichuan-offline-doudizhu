@@ -1,11 +1,19 @@
 ﻿#include "game_engine.h"
 #include <algorithm>
 #include <cassert>
+#include <limits>
 #include "../rules/scoring_engine.h"
 
 namespace fpdz {
 
 GameEngine::GameEngine() {}
+
+bool GameEngine::restoreState(const GameState& state) {
+    if (state.gameId() == std::numeric_limits<uint64_t>::max()) return false;
+    m_state = state;
+    m_gameIdCounter = std::max(m_gameIdCounter, state.gameId() + 1);
+    return true;
+}
 
 CommandResult GameEngine::execute(const GameCommand& cmd) {
     switch (cmd.type) {

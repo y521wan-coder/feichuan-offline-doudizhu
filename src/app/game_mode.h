@@ -6,7 +6,8 @@ namespace fpdz {
 
 enum class GameMode {
     Offline,
-    AiBattle
+    AiBattle,
+    Online
 };
 
 } // namespace fpdz

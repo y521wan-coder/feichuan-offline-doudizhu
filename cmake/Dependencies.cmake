@@ -1,6 +1,6 @@
 ﻿# Dependencies.cmake - Find and configure third-party dependencies
 
-find_package(Qt6 6.8 REQUIRED COMPONENTS Core Widgets Network Test)
+find_package(Qt6 6.8 REQUIRED COMPONENTS Core Widgets Network WebSockets Test)
 
 # Qt auto-features
 set(CMAKE_AUTOMOC ON)

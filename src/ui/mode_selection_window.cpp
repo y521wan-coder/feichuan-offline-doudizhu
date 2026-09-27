@@ -24,7 +24,7 @@ ModeSelectionWindow::ModeSelectionWindow(QWidget* parent) : QWidget(parent) {
     m_offlineButton = new QPushButton(QString::fromUtf8(u8"纯单机版模式"), this);
     m_offlineButton->setObjectName(QStringLiteral("offlineModeButton"));
     m_offlineButton->setAccessibleName(
-        QString::fromUtf8(u8"纯单机版模式，第一项，共两项"));
+        QString::fromUtf8(u8"纯单机版模式，第一项，共三项"));
     m_offlineButton->setAccessibleDescription(
         QString::fromUtf8(u8"使用现有二点一版的本地规则和三级机器人，不会启动AI服务或联网"));
     layout->addWidget(m_offlineButton);
@@ -32,22 +32,35 @@ ModeSelectionWindow::ModeSelectionWindow(QWidget* parent) : QWidget(parent) {
     m_aiBattleButton = new QPushButton(QString::fromUtf8(u8"AI对战模式"), this);
     m_aiBattleButton->setObjectName(QStringLiteral("aiBattleModeButton"));
     m_aiBattleButton->setAccessibleName(
-        QString::fromUtf8(u8"AI对战模式，第二项，共两项"));
+        QString::fromUtf8(u8"AI对战模式，第二项，共三项"));
     m_aiBattleButton->setAccessibleDescription(
         QString::fromUtf8(u8"为2及之后的电脑座位配置同一个云模型"));
     layout->addWidget(m_aiBattleButton);
+
+    m_onlineButton = new QPushButton(QString::fromUtf8(u8"在线真人版"), this);
+    m_onlineButton->setObjectName(QStringLiteral("onlineModeButton"));
+    m_onlineButton->setAccessibleName(
+        QString::fromUtf8(u8"在线真人版，第三项，共三项"));
+    m_onlineButton->setAccessibleDescription(
+        QString::fromUtf8(u8"启动独立在线程序，与真人联网斗地主"));
+    layout->addWidget(m_onlineButton);
     layout->addStretch();
 
     setTabOrder(m_offlineButton, m_aiBattleButton);
-    setTabOrder(m_aiBattleButton, m_offlineButton);
+    setTabOrder(m_aiBattleButton, m_onlineButton);
+    setTabOrder(m_onlineButton, m_offlineButton);
     m_offlineButton->installEventFilter(this);
     m_aiBattleButton->installEventFilter(this);
+    m_onlineButton->installEventFilter(this);
 
     connect(m_offlineButton, &QPushButton::clicked, this, [this]() {
         emit modeSelected(GameMode::Offline);
     });
     connect(m_aiBattleButton, &QPushButton::clicked, this, [this]() {
         emit modeSelected(GameMode::AiBattle);
+    });
+    connect(m_onlineButton, &QPushButton::clicked, this, [this]() {
+        emit modeSelected(GameMode::Online);
     });
 
     // A screen reader announces the focused button itself. Do not also send a

@@ -1,49 +1,68 @@
 飞船斗地主——完整继续开发说明
-更新时间：2026-09-25
+更新时间：2026-09-27
 项目目录：C:\Feichuan-Doudizhu
 开源仓库：https://github.com/y521wan-coder/feichuan-offline-doudizhu
-当前正式版本：2.2
+当前正式版本：2.3
 
 一、接手顺序与当前状态
 
-1. 先读 AGENTS.md、本文件、docs/架构说明.md、docs/规则规格.md、docs/AI对战模式规格.md、docs/测试与验收.md、docs/更新协议.md；AI 对战历史另见 docs/AI对战模式交接计划.md，四人规则修订历史见 docs/2026-09-25-四人规则修订交接.md。
-2. 执行 git -c core.quotepath=false status --short、git log -12 --oneline、git diff --stat，并核对当前进程、构建产物、安装文件和更新服务器。不要仅凭历史交接中的哈希判断现状，不得 reset、checkout、clean 丢弃工作区内容。
-3. 正式 2.2 产品提交为 9dab809820b60090f4070140d28a3b03d7f86b5b，main 已推送，注解标签 v2.2 已推送并解引用到该提交。根目录本说明及发布后状态由后续文档提交记录；以 git log 的最新结果为准。
-4. 更新服务器当前正式版为 windows/stable/2.2，Release ID 76，status=published。此前 2.1 提交 eafc5f07e9e373a78581ec8b061651f36f74b3e5 及 v2.1 标签保留历史，不得重复发布 2.1 或 2.2。
+1. 先读 AGENTS.md、本文件、docs/架构说明.md、docs/规则规格.md、docs/在线2.3回归表.md、docs/测试与验收.md、docs/更新协议.md；AI 对战历史见 docs/AI对战模式交接计划.md，四人规则修订历史见 docs/2026-09-25-四人规则修订交接.md。
+2. 执行 git -c core.quotepath=false status --short、git log -12 --oneline、git diff --stat，并核对当前进程、构建产物、安装文件和更新服务器。不要只凭历史交接中的哈希判断现状，不得 reset、checkout、clean 丢弃工作区内容。
+3. 2.2 的正式产品提交为 9dab809、注解标签 v2.2；2.3 的产品提交、标签与推送状态以 git log 的最新结果为准（见第五节）。
+4. 联机服务已在生产服务器上运行：Debian 12、专用普通账户 fpdz_online（无 sudo、无 docker 组）、rootless Podman pod `fpdz-online`、专用 PostgreSQL 15 容器、用户级 systemd 单元 `fpdz-online.service`，只绑定 127.0.0.1:19643，公网入口是 Nginx 的 https://play.327802521.xyz/ws 。
 
-二、2.2 正式发布内容
+二、2.3 正式发布内容
 
-1. 2.2 包含 2.1 正式发布后陆续完成的试用功能：AI 对战模式、一个共用云模型及等待上限、可编辑的每轮策略提示词、最近 50 局完整对战信息的一键复制、真人回合操作时间、Ctrl+左/右浏览整组牌、四人炸弹名称和飞机对子翅膀规则、完整玩法 TXT，以及本轮“地主首轮必须出牌”开关。发布这些既有试用功能没有恢复已撤回的控制牌 AI。
-2. 单机和 AI 对战各自在 F5 设置中显示“地主首轮必须出牌（不可过牌）”，旧设置缺字段时默认开启。开启后，仅真人作为地主、第一次自由领出时必须出一手合法牌：过牌按钮不可用，过牌快捷键不会成功，也不由操作倒计时自动过牌。关闭后按原来的领出过牌方式允许首轮跳过。地主之后回应上一手牌时正常过牌；云模型自由领出的本地合法动作目录仍不包含过牌。
-3. 两个设置分别存入原单机 settings.json 与 AI 对战 ai_battle/settings.json，不混用。核心改动在 src/app/app_settings.h/.cpp、src/app/ai_battle_types.h/.cpp、src/ui/dialogs/settings_dialog.h/.cpp、src/ui/dialogs/ai_battle_settings_dialog.h/.cpp、src/ui/main_window.h/.cpp。没有改动发牌、牌型、倍数或云模型原策略文字。
-4. AI 对战真人固定 1 号，其余二／三／四人电脑座位共用一个用户选择的云模型；AI 服务是独立进程，主程序不链接 Qt Network。AI 服务可接收真实整桌信息并从本地合法动作目录选编号，游戏引擎复验后才推进。纯单机不启动 AI 服务或发送模型请求。
-5. AI 对战设置中的“每轮AI策略提示词”可编辑最多 8192 字并恢复原默认；Tab/Shift+Tab 能正常离开和返回编辑框。当前策略从下一次云请求生效，固定协议和按人数规则仍由程序附加。提示词及公开动作和云请求耗时写入本机详细牌局，因此不得在提示词里放密钥或私人资料。
-6. AI 对战“游戏 → 复制最近50局完整对战记录”按新到旧复制已结束牌局 JSON。详细记录位于 ai_battle/replays/detailed/，成功写入第 51 局时删除最早一局；包含公开叫分/出牌/过牌顺序、牌面、结算、模型选择、当轮策略、候选数量、请求与响应时间、耗时、令牌用量和安全故障码。未公开手牌、隐藏底牌、二人盖牌、认证地址、密钥、模型原始响应和隐藏推理过程不进入记录。真实模型的内部思考过程无法从当前接口可靠获取。
-7. 四人局一小王加一大王称“双王枪毙”，两小王加两大王称“天尊无敌”；飞机带对的翅膀不得与主体同点。二／三人“王炸”名称不变。Ctrl+左/右按同点数整组浏览两张至八张的牌，跳过单张；普通左/右逐牌浏览仍在。AI 对战的人类操作倒计时可在设置中调整到最多 1800 秒，单机原有设置保留。
+1. 启动页新增第三个按钮“在线真人版”，与“离线单机版”“AI 对战模式”并列。Tab、Shift+Tab、回车可完成全部选择；前两个模式的入口、窗口、规则、AI、设置、存档、声音、快捷键和更新器行为不变。
+2. 在线真人版是独立 Windows 程序 `飞船斗地主在线版.exe`，由主程序启动并在其退出后恢复模式选择页。它只保存服务端发来的公开房间视图、本家手牌和房内最近 20 条纯文本消息，不创建 GameEngine、GameState 或 FullGameState；选牌预览用现有 PatternAnalyzer 本地完成，最终动作由服务端判定。
+3. 人数页在二人、三人、四人之间用 Tab 移动、回车进入；每种人数有固定编号 01～20 的房间，共 60 间。大厅用左右光标键循环浏览并朗读房号、人数、已占席位、是否需要密码和房间状态，回车尝试加入。房间需要密码时先要求输入。
+4. 牌桌快捷键：F1 房主在席位满员时开战（每局结算后也须再按 F1）；F2 查看已公开底牌；F3 固定中文表情列表（左右光标浏览、回车发送、Esc 取消）；F4 房内最近 20 条消息与输入框（回车发送、Esc 关闭，新消息按顺序朗读发送者和正文）；F5 在线设置。
+5. F5 在线设置包含：向全服发邀请、邀请指定玩家（只列出已登录、处于大厅且愿意接收邀请者，用公开昵称和短编号区分重名）、接收邀请开关、房间密码（仅房主独自在房且未开局时可设置或更换）、回合时限（15/30/60/120 秒，默认 15 秒，本局开始后锁定）、自定义表情音效导入与试听，以及“复制在线诊断信息”。
+6. 空房第一名进入者成为房主；房间变空即清除密码、房主和临时消息；房主离开而房内还有真人时由最早加入的在场真人继任，原密码在房间清空前保持有效。邀请资格绑定收件账号和房间、一次使用、60 秒失效，接受邀请可免输该房密码，但不预留席位，满员者得到“房间已满”。
+7. 回合超时由服务端权威计时：叫分超时自动“不叫”，跟牌超时自动“过牌”，必须领出的回合由轻量机器人出一手合法牌；机器人只拿本席手牌与公开信息（AiFullInformation.available=false），在受限工作线程计算，结果回来核对轮次、修订号和引擎合法性，迟到结果丢弃。只要本局发生过任何自动操作，该局仍显示胜负与得分，但所有人的账号战绩不计入。
+8. 断线保留原账号席位 30 秒；主动离房或正常关闭在线程序会先发送 leave，立即交机器人完成本局。在线程序和服务端都能复制脱敏诊断信息（只含版本、连接与房间计数、错误码、修订号等，不含口令、令牌、手牌、底牌、聊天正文或随机种子）。
+9. 账号：用户名为 3～24 位 ASCII 字母、数字和下划线，按规范小写唯一；公开昵称 1～16 个可显示字符、允许重名；口令 10～128 个字符。口令和房间密码用 libsodium Argon2id 哈希，会话令牌只存哈希；“记住登录”仅在勾选时用 Windows DPAPI 保存到在线专用数据目录，主动退出登录立即撤销会话并删除本地密文。
 
 三、构建、测试与限制
 
-1. 固定开发环境：C:\Feichuan-Doudizhu，Qt 6.8.3 msvc2022_64、CMake、Ninja、MSVC x64。增量构建为 .\tools\build.ps1 -Preset release-x64 -Build；正式发布构建为 .\tools\build_release.ps1 -Package。
-2. 本轮地主首轮设置的默认值、旧配置读取、保存往返、单机与 AI 对战两个 F5 设置页、开启/关闭后的首轮过牌以及后续回应过牌均有自动回归。完整正式构建与 CTest 21/21 通过，180.35 秒；主窗口目标在 FPDZ_DISABLE_SCREEN_READER_APIS=1 下为 117/117 通过。
-3. 本机运行争渡读屏时，不设置上述测试环境变量会使两项传统焦点／讲述人公告事件计数测试失败；此前试用阶段已有同样失败。关闭私有接口后自动测试通过，仅说明逻辑回归，不等于 NVDA、讲述人、争渡、保益的真实听感人工验收。用户实际试玩、完整真实牌局复盘、提示词棋力提升和固定战略场景均未由本轮验证。
-4. 本轮未调用真实模型或读取 credentials.dat；未重复此前 9 组共 90,000 局本地稳定性基线和 30,000 局假模型压力。此前长测证据见 docs/测试与验收.md，不能写成本轮重新通过。
-5. 发布脚本已补入独立 AI 服务及其 Qt Network/TLS 运行文件；安装暂存中有主程序、AI 服务、更新器、Qt6Network.dll 和 tls/qschannelbackend.dll。签名为产品固定公钥发布清单，安装包 Authenticode 仍未签署公开 CA 证书。
+1. 固定开发环境：C:\Feichuan-Doudizhu，Qt 6.8.3 msvc2022_64（含 WebSockets）、CMake、Ninja、MSVC x64。增量构建 .\tools\build.ps1 -Preset release-x64 -Build；正式发布构建 .\tools\build_release.ps1 -Package。
+2. 本轮 Release 全量构建与 CTest 为 22/22 通过（179.84 秒），含新增 test_online_storage；签名恢复字段与旧存档兼容有针对性测试；dumpbin /dependents 确认主程序没有 QtNetwork/WebSockets 依赖。
+3. 联机协议端到端测试 python tools\online_formal_test.py --uri ws://127.0.0.1:<端口>/ws （只接受回环地址，会创建测试账号和房间）13 组全部通过；对正式服务复测时经 ssh -L 隧道指向服务器回环端口。
+4. 容量测试 python tools\online_formal_load.py --uri wss://play.327802521.xyz/ws --connect-host <服务器IP> --minutes 30 --rooms 38 --exercise-paths，结果与原始文件见 docs/在线2.3回归表.md。注意：测试脚本把注册/登录限并发（服务端 Argon2id 在事件循环内执行），对局阶段仍是满并发。
+5. 已知限制：第二家运营商复测按用户指示未执行；四种读屏的联机听感未人工验收；表情音效成品等用户提供；服务端注册哈希未移到工作线程。
+6. 原主程序、core、ai、原 ui 不链接 Qt Network；只有更新器、独立 AI 服务和独立在线程序联网。在线程序使用 Qt WebSockets，安装包必须携带 Qt6WebSockets.dll、Qt6Network.dll 和 tls/qschannelbackend.dll。
 
-四、正式发布与本机安装状态
+四、联机服务与部署状态
 
-1. 正式安装包为 releases/飞船斗地主-Setup-2.2.exe，62,110,393 字节，SHA-256 3BCD568220995E8F33C61D7BB89B59A8C3472646EB8530DCF74E57E94ACF74B9。对应固定公钥清单为 releases/飞船斗地主-Setup-2.2.release-manifest.json，签名密钥 ID 898098f7c562190b1bae909422cf7b5ef09a34bc3e400110fa18cc65a77ff81a。签名时仅使用仓库外 DPAPI 凭据，未把私钥或密码写入仓库。
-2. 服务器返回 Release ID 76、版本 2.2、status=published；0.9 可发现 2.2，2.2 显示无更新，API 的大小、SHA-256、签名与密钥 ID 均同本地清单一致，回下载安装包哈希一致，SERVER_VERIFICATION=OK。GitHub main 已推送产品提交 9dab809，注解标签 v2.2 指向同一产品提交。
-3. 本机安装目录 C:\Program Files\飞船斗地主 共 197 个文件。本轮未运行安装器、更新器，也未修改安装注册表或用户数据；按此前用户确定的开发原则，仅替换了安装版主程序、AI 服务以及与新规则同步的玩法说明和更新日志 TXT。替换前确认相关进程未运行，旧四文件备份在 build/release-x64/install-trial-backup-20260925-2.2-release/。
-4. 安装版主程序 1,114,112 字节，文件版本 2.2.0.0，SHA-256 EAED6C9954B9FC9CA954B32BDD499C0CCDDE2883DF6244CEE1EBB73456E26622；AI 服务 125,440 字节，SHA-256 77FF22C3100CC9610E2AA8B858C2343416A480A60E79FD15EB66E9F55F514B9A。两者与正式构建产物一致。安装版玩法 TXT SHA-256 347BE4424EE4DE6619DFF55A6B1AC157F9DBCDECFE454A6ABD463FC39C2B22F0；更新日志 TXT SHA-256 D25090A923B6EAB4B5A50AA377981F309CE75D2D8239B0A7AD32C7C930F584C2，均与 assets/docs 来源一致。
-5. 因只替换内核和必要 TXT，本机注册表安装版本及更新器文件可能仍为历史 2.0；不能把本机说成运行了正式 2.2 安装器。未启动安装版做真实模型试玩或读屏人工验收。
+1. 服务器：Debian 12，约 2 GB 内存，现有更新服务容器（deploy-web-1、deploy-db-1）未改动。联机服务单独使用普通账户 fpdz_online。
+2. 运行方式：~/online/ 保存 database.env 与 server.env（600，数据库口令随机生成，不入仓库）；~/online/online-start.sh、online-stop.sh 由 systemd 用户单元 fpdz-online.service（oneshot + RemainAfterExit）调用，linger 已开启，重启后自动恢复。pod 内两个容器都是非 root：服务容器以 10001:10001 运行、只读根文件系统、丢弃全部能力、no-new-privileges、内存 512m、进程数 256；PostgreSQL 容器独立数据卷、不发布端口、内存 512m。
+3. 公网入口：Nginx /etc/nginx/conf.d/fpdz-online.conf（来源 apps/online_server/deploy/nginx-play.conf）为 play.327802521.xyz 终止 TLS 并代理到 127.0.0.1:19643；旧容量路由备份在 /root/nginx-config-backups/。回切联机路由只需恢复该备份并 reload nginx，不需要动更新服务。
+4. DNS：play.327802521.xyz 为 Cloudflare 上的 A 记录指向 154.23.163.68（DNS only），使用既有 *.327802521.xyz 证书。
+5. 部署脚本与镜像构建都在仓库内：apps/online_server/Dockerfile.production（Debian 12 + Qt 6.4 + libsodium）、apps/online_server/migrations/001_initial.sql、apps/online_server/migrate.sh（先 pg_dump 备份再迁移）、apps/online_server/deploy/（install-production.sh、online-start.sh、online-stop.sh、fpdz-online.service、nginx-play.conf、deploy-online-production.sh、create-play-dns.sh、activate-online-route.sh）。镜像在本机 WSL Docker 构建、docker save | gzip 后传到服务器由 fpdz_online 用 podman load 导入。
+6. 数据库：联机数据库 fpdz_online 与更新服务数据库完全分开；账号、会话、60 间固定房与席位、进行中快照、请求去重记录、结算结果和按人数分开的战绩都在联机库里。完成一局后删除含暗牌的快照。
+7. 常用排障：--diagnostics 子命令打印只读 JSON（构建版本、库连接、60 间房状态与修订号、账号/会话/结算计数）；容器日志里有 online_diagnostic（每分钟连接数、正在对局的房间、暂停房间、错误码计数）和 client_disconnect close_code=… seated=1。
 
-五、后续开发原则与不可变边界
+五、正式发布与本机安装状态
+
+1. 安装包：releases/飞船斗地主-Setup-2.3.exe，62,289,643 字节，SHA-256 61F2E4B728D205E4FC803C8AC7066A108A15E22BF8A51DB1AAD1078EA77505EE；固定公钥清单 releases/飞船斗地主-Setup-2.3.release-manifest.json，签名密钥 ID 898098f7c562190b1bae909422cf7b5ef09a34bc3e400110fa18cc65a77ff81a。安装包内含主程序、AI 服务、更新器、在线程序、Qt6WebSockets.dll、Qt6Network.dll 与 tls 插件。
+2. 更新服务器与 GitHub 的最终状态见本文件末尾“发布结果”小节与 docs/更新协议.md；发布前已确认远端未占用 2.3。
+3. 本轮没有运行安装器、没有修改注册表或用户数据目录；安装版内核是否替换由用户当轮要求决定。
+
+六、后续开发原则与不可变边界
 
 1. 用户已确定默认开发原则：未明确要求额外事项时，仅修改所指出的功能和使其生效所必需的代码、针对性测试，完成后备份并替换安装版内核；不顺手改其它功能、设置、提示词、文档或用户数据，也不擅自提交、签名、发布、推送或打标签。用户明确要求的事项按当轮要求执行。
-2. 产品名“飞船斗地主”、产品标识 feichuan_offline_doudizhu、安装器 AppId {6D733A47-91F6-4B19-A70D-48F9D8231C81}、应用数据路径和固定发布公钥不得变动。主程序、core、ai、ui 不链接 Qt Network；只有更新器与独立 AI 服务联网。
-3. AI 只通过 AiObservation 接收全知信息，不得持有 GameState、FullGameState、洗牌种子或未来牌序。真实暗牌不得进入公共快照、界面、朗读、普通回放、统计和诊断日志；详细牌局只含已公开牌面。密钥、Token、DPAPI 数据、服务器配置和 SSH 私钥不得进入仓库、文档、日志或聊天。
-4. 后续若要正式发布新版本，先根据用户当轮要求确定版本号，检查远端未占用；按构建、测试、打包、固定公钥清单签名、服务器发布验证、GitHub 提交/标签/推送、最终交接记录的顺序操作。版本 2.0～2.9 之后用 3.0，不用 2.10。
+2. 产品名“飞船斗地主”、产品标识 feichuan_offline_doudizhu、安装器 AppId {6D733A47-91F6-4B19-A70D-48F9D8231C81}、应用数据路径和固定发布公钥不得变动。
+3. AI 只通过 AiObservation 接收全知信息，不得持有 GameState、FullGameState、洗牌种子或未来牌序。真实暗牌不得进入公共快照、界面、朗读、普通回放、统计、诊断日志和联机网络视图。密钥、Token、DPAPI 数据、服务器配置、数据库口令和 SSH 私钥不得进入仓库、文档、日志或聊天。
+4. 联机服务可以持有完整引擎状态以判定规则，但任何网络视图只能包含公开牌局数据和收件者本家手牌；托管必须使用非全知观察，发生过自动操作的局不计账号战绩。
+5. 后续若要正式发布新版本，先根据用户当轮要求确定版本号，检查远端未占用；按构建、测试、打包、固定公钥清单签名、服务器发布验证、GitHub 提交/标签/推送、最终交接记录的顺序操作。版本 2.0～2.9 之后用 3.0，不用 2.10；已发布的版本号不得重复发布。
 
-六、下一步
+七、下一步
 
-等待用户试玩安装版的地主首轮开关、AI 对战详细牌局复制和自定义提示词；若反馈具体问题，先定位并只修改相关处。真实模型胜率与四种读屏的实际听感仍需人工验证，不应因本轮自动测试或发布成功而写成通过。
+1. 等待用户试玩在线真人版并反馈：登录与记住登录、三种人数大厅、密码房、邀请、表情与房内消息、回合时限、断线重连和托管手感。
+2. 用户制作好表情音效后，在在线设置里逐个导入；表情编号目前固定为 1～8（微笑、大笑、鼓掌、加油、惊讶、无奈、鲜花、鸡蛋），如需增加表情要与服务端编号同步。
+3. 四种读屏在联机过程中的真实听感需要用户和伙伴上线后反馈；第二家运营商网络复测已按用户指示取消，记为未执行。
+4. 可选的后续优化：把服务端 Argon2id 哈希移到受限工作线程，避免大批量注册时的排队；为在线客户端补一套可自动化的协议级 UI 回归。
+
+发布结果
+
+- （发布完成后填写）

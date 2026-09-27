@@ -3,6 +3,7 @@
 #include "game_mode.h"
 
 #include <QObject>
+#include <QProcess>
 #include <memory>
 
 namespace fpdz {
@@ -22,6 +23,8 @@ public:
 
 private:
     void startMode(GameMode mode);
+    void startOnlineMode();
+    void finishOnlineMode(const QString& error = {});
     void returnToModeSelection();
 
     ServiceRegistry& m_services;
@@ -29,6 +32,9 @@ private:
     std::unique_ptr<ModeSelectionWindow> m_modeSelection;
     std::unique_ptr<MainWindow> m_mainWindow;
     std::unique_ptr<DiagnosticTraceService> m_aiBattleDiagnosticTrace;
+    QProcess m_onlineProcess;
+    bool m_onlineModeActive = false;
+    bool m_previousQuitOnLastWindowClosed = true;
 };
 
 } // namespace fpdz

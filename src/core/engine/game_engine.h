@@ -24,6 +24,10 @@ public:
     const FullGameState& fullState() const { return m_state.fullState(); }
     GameState& state() { return m_state; }
 
+    // Restoring a committed snapshot must also advance the next local game ID.
+    // Returns false for an ID that leaves no representable successor.
+    bool restoreState(const GameState& state);
+
     // Get public snapshot
     PublicGameSnapshot publicSnapshot() const { return m_state.publicSnapshot(); }
 

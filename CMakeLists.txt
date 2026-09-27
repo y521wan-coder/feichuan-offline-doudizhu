@@ -151,6 +151,10 @@ target_link_libraries(fpdz_ui PUBLIC
 set_target_properties(fpdz_ui PROPERTIES AUTOMOC ON AUTORCC ON)
 fpdz_apply_warnings(fpdz_ui)
 
+# The online program is a separate process. Its WebSocket dependency must not
+# be linked into the original game, core, AI, or UI targets.
+add_subdirectory(apps/online_client)
+
 # Main executable
 add_executable(FeichuanOfflineDoudizhu
     src/main.cpp

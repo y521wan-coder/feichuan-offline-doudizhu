@@ -3,7 +3,7 @@
 include(GNUInstallDirs)
 
 install(TARGETS FeichuanOfflineDoudizhu FeichuanOfflineDoudizhuUpdater
-                FeichuanDoudizhuAiService
+                FeichuanDoudizhuAiService FeichuanOnlineDoudizhu
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
 
@@ -34,6 +34,13 @@ if(WINDEPLOYQT_EXECUTABLE)
                 --no-system-d3d-compiler
                 --no-opengl-sw
                 \"\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}/飞船斗地主AI服务.exe\"
+        )
+        execute_process(
+            COMMAND \"${WINDEPLOYQT_EXECUTABLE}\"
+                --no-translations
+                --no-system-d3d-compiler
+                --no-opengl-sw
+                \"\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}/飞船斗地主在线版.exe\"
         )
     ")
 endif()

@@ -152,6 +152,80 @@ private slots:
         QCOMPARE(GameState::fromJson(legacy).fullState().activePlayerCount, PLAYER_COUNT);
     }
 
+    void testCommittedStateRestoresEveryTurnFieldAndAdvancesGameId() {
+        GameEngine engine;
+        GameCommand start;
+        start.type = GameCommandType::StartGame;
+        start.randomSeed = 17;
+        start.playerCount = THREE_PLAYER_COUNT;
+        QVERIFY(engine.execute(start).success);
+
+        auto& state = engine.state();
+        state.setGameId(42);
+        state.fullState().consecutiveRedeals = 2;
+        state.fullState().players[1].lastActionWasPass = true;
+        RuleSet rules = state.ruleSet();
+        rules.ruleVersion = 7;
+        state.setRuleSet(rules);
+
+        const QJsonObject saved = state.toJson();
+        QCOMPARE(saved["schemaVersion"].toInt(), 5);
+        const GameState restored = GameState::fromJson(saved);
+        QCOMPARE(restored.fullState().consecutiveRedeals, 2);
+        QVERIFY(restored.fullState().players[1].lastActionWasPass);
+        QCOMPARE(restored.ruleSet().ruleVersion, 7);
+        QCOMPARE(restored.toJson(), saved);
+
+        GameEngine resumed;
+        QVERIFY(resumed.restoreState(restored));
+        QCOMPARE(resumed.state().gameId(), uint64_t(42));
+        resumed.state().setPhase(GamePhase::Finished);
+        QVERIFY(resumed.execute(start).success);
+        QCOMPARE(resumed.state().gameId(), uint64_t(43));
+
+        QJsonObject oldSave = saved;
+        oldSave["schemaVersion"] = 4;
+        oldSave.remove("consecutiveRedeals");
+        oldSave.remove("ruleVersion");
+        QJsonArray players = oldSave["players"].toArray();
+        QJsonObject player = players[1].toObject();
+        player.remove("lastActionWasPass");
+        players[1] = player;
+        oldSave["players"] = players;
+        const GameState legacy = GameState::fromJson(oldSave);
+        QCOMPARE(legacy.fullState().consecutiveRedeals, 0);
+        QVERIFY(!legacy.fullState().players[1].lastActionWasPass);
+        QCOMPARE(legacy.ruleSet().ruleVersion, RuleSet::VERSION);
+        QCOMPARE(legacy.phase(), GamePhase::Bidding);
+        QCOMPARE(legacy.fullState().players[1].hand.size(),
+                 restored.fullState().players[1].hand.size());
+    }
+
+    void testSnapshotPreservesUnsignedIdentifiersAndReadsLegacyNumbers() {
+        GameState state;
+        constexpr uint64_t largeId = 0xfedcba9876543210ULL;
+        constexpr uint64_t largeSeed = 0x876543210fedcba9ULL;
+        state.setGameId(largeId);
+        state.fullState().randomSeed = largeSeed;
+        state.fullState().eventSequence = largeId;
+        const QJsonObject saved = state.toJson();
+        QCOMPARE(saved["gameId"].toString(), QString::number(largeId));
+        QCOMPARE(saved["randomSeed"].toString(), QString::number(largeSeed));
+        QCOMPARE(GameState::fromJson(saved).fullState().gameId, largeId);
+        QCOMPARE(GameState::fromJson(saved).fullState().randomSeed, largeSeed);
+        QCOMPARE(GameState::fromJson(saved).fullState().eventSequence, largeId);
+
+        QJsonObject legacy = saved;
+        legacy["schemaVersion"] = 4;
+        legacy["gameId"] = qint64(42);
+        legacy["randomSeed"] = qint64(17);
+        legacy["eventSequence"] = qint64(9);
+        const GameState oldState = GameState::fromJson(legacy);
+        QCOMPARE(oldState.gameId(), uint64_t(42));
+        QCOMPARE(oldState.fullState().randomSeed, uint64_t(17));
+        QCOMPARE(oldState.fullState().eventSequence, uint64_t(9));
+    }
+
     void testThreePlayerBiddingAndTurnOrderNeverUseFourthSeat() {
         GameEngine engine;
         GameCommand start;
