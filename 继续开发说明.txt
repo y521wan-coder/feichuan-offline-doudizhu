@@ -70,4 +70,4 @@
 - 安装包与签名：releases/飞船斗地主-Setup-2.3.exe，62,289,643 字节，SHA-256 61F2E4B728D205E4FC803C8AC7066A108A15E22BF8A51DB1AAD1078EA77505EE；固定公钥清单 releases/飞船斗地主-Setup-2.3.release-manifest.json，密钥 ID 898098f7c562190b1bae909422cf7b5ef09a34bc3e400110fa18cc65a77ff81a。
 - 更新服务器：Release ID 77，版本 2.3，status=published。2.2 与 0.9 的更新检查都能发现 2.3，2.3 显示无更新；服务器回下载文件大小与 SHA-256 与本地清单一致，publish_update.py 输出 SERVER_VERIFICATION=OK。
 - GitHub：产品提交 007ddfd581d837843da048b6b64dbda9f73a9954（feat: release 2.3 online multiplayer mode）已推送到 main；注解标签 v2.3 已推送并解引用到同一提交（标签对象 2490df1ef5ef6daf3927a359c9feeee78a53c73b）。本文件所在文档提交紧随其后，以 git log 为准。
-- 本机安装目录 C:\Program Files\飞船斗地主 本轮未改动；安装 2.3 由用户运行新安装包或让现有更新器升级完成。
+- 本机安装目录 C:\Program Files\飞船斗地主 按项目惯例只替换内核文件，未运行安装器、未改注册表、未动用户数据：新增 飞船斗地主在线版.exe 与 Qt6WebSockets.dll，更新 飞船斗地主.exe（1,119,232 字节）、飞船斗地主AI服务.exe、飞船斗地主更新器.exe、Qt6Network.dll、tls/qschannelbackend.dll，以及 docs 下四份 TXT；被替换的原文件备份在 build/release-x64/install-trial-backup-20260927-2.3-release/。安装版主程序和在线程序都通过了 6 秒隐藏启动检查。注册表里的安装版本可能仍是旧版本号，不能把本机说成运行过正式 2.3 安装器。
