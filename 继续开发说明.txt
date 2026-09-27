@@ -63,6 +63,11 @@
 3. 四种读屏在联机过程中的真实听感需要用户和伙伴上线后反馈；第二家运营商网络复测已按用户指示取消，记为未执行。
 4. 可选的后续优化：把服务端 Argon2id 哈希移到受限工作线程，避免大批量注册时的排队；为在线客户端补一套可自动化的协议级 UI 回归。
 
-发布结果
+发布结果（2026-09-27 完成）
 
-- （发布完成后填写）
+- 联机服务：Debian 12 服务器上的 rootless pod `fpdz-online` 正常运行，公网入口 https://play.327802521.xyz/ws 健康检查通过；`--diagnostics` 返回 build_version 2.3、schema_ok true、60 间房。
+- 容量：100 名同时在局、38 间房、30 分钟实测通过（确认 P95 191.26 毫秒、牌局操作 P95 192.31 毫秒、服务端处理 P95 9.6～11.5 毫秒、可用内存最低约 843 MiB、CPU 平均 15.70% 且没有单点超过 70%、无持续换页），原始数据见 docs/在线2.3回归表.md 引用。
+- 安装包与签名：releases/飞船斗地主-Setup-2.3.exe，62,289,643 字节，SHA-256 61F2E4B728D205E4FC803C8AC7066A108A15E22BF8A51DB1AAD1078EA77505EE；固定公钥清单 releases/飞船斗地主-Setup-2.3.release-manifest.json，密钥 ID 898098f7c562190b1bae909422cf7b5ef09a34bc3e400110fa18cc65a77ff81a。
+- 更新服务器：Release ID 77，版本 2.3，status=published。2.2 与 0.9 的更新检查都能发现 2.3，2.3 显示无更新；服务器回下载文件大小与 SHA-256 与本地清单一致，publish_update.py 输出 SERVER_VERIFICATION=OK。
+- GitHub：产品提交 007ddfd581d837843da048b6b64dbda9f73a9954（feat: release 2.3 online multiplayer mode）已推送到 main；注解标签 v2.3 已推送并解引用到同一提交（标签对象 2490df1ef5ef6daf3927a359c9feeee78a53c73b）。本文件所在文档提交紧随其后，以 git log 为准。
+- 本机安装目录 C:\Program Files\飞船斗地主 本轮未改动；安装 2.3 由用户运行新安装包或让现有更新器升级完成。
