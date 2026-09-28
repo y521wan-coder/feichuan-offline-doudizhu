@@ -1,5 +1,5 @@
 [Unit]
-Description=Feichuan 2.3 online multiplayer service (rootless pod)
+Description=Feichuan 2.4 online multiplayer service (rootless pod)
 After=network-online.target
 
 [Service]

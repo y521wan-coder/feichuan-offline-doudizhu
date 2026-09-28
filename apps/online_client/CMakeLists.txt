@@ -2,6 +2,7 @@ add_executable(FeichuanOnlineDoudizhu
     main.cpp
     online_window.cpp
     online_window.h
+    online_lobby_controls.h
     online_storage.cpp
     online_storage.h
 )
@@ -21,12 +22,23 @@ if(WIN32)
     target_link_libraries(test_online_storage PRIVATE Qt6::Core Qt6::Test crypt32)
     set_target_properties(test_online_storage PROPERTIES AUTOMOC ON)
     add_test(NAME test_online_storage COMMAND test_online_storage)
+    add_executable(test_online_lobby test_online_lobby.cpp online_lobby_controls.h)
+    target_link_libraries(test_online_lobby PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Test)
+    add_test(NAME test_online_lobby COMMAND test_online_lobby)
     get_filename_component(_online_test_qt_root "${Qt6_DIR}/../../.." ABSOLUTE)
     add_custom_command(TARGET test_online_storage POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${_online_test_qt_root}/bin/Qt6Core$<$<CONFIG:Debug>:d>.dll"
             "${_online_test_qt_root}/bin/Qt6Test$<$<CONFIG:Debug>:d>.dll"
             "$<TARGET_FILE_DIR:test_online_storage>"
+    )
+    add_custom_command(TARGET test_online_lobby POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${_online_test_qt_root}/bin/Qt6Core$<$<CONFIG:Debug>:d>.dll"
+            "${_online_test_qt_root}/bin/Qt6Gui$<$<CONFIG:Debug>:d>.dll"
+            "${_online_test_qt_root}/bin/Qt6Widgets$<$<CONFIG:Debug>:d>.dll"
+            "${_online_test_qt_root}/bin/Qt6Test$<$<CONFIG:Debug>:d>.dll"
+            "$<TARGET_FILE_DIR:test_online_lobby>"
     )
 endif()
 

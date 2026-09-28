@@ -18,15 +18,10 @@ if [ ! -f "$state_dir/database.env" ]; then
     echo 'generated isolated database credentials'
 fi
 
-if [ -f "$deploy_dir/fpdz-online-production-2.3.tar.gz" ]; then
-    podman load -i "$deploy_dir/fpdz-online-production-2.3.tar.gz" >/dev/null
+if [ -f "$deploy_dir/fpdz-online-production-2.4.tar.gz" ]; then
+    podman load -i "$deploy_dir/fpdz-online-production-2.4.tar.gz" >/dev/null
 fi
-# The deploy archive is built with the release tag, but retag the newest
-# fpdz-online-production image as a safety net when a different tag was loaded.
-newest="$(podman images --sort created --format '{{.Repository}}:{{.Tag}}' \
-    | grep 'fpdz-online-production' | grep -v ':2\.3$' | tail -1)"
-if [ -n "$newest" ]; then podman tag "$newest" localhost/fpdz-online-production:2.3; fi
-podman image exists localhost/fpdz-online-production:2.3
+podman image exists localhost/fpdz-online-production:2.4
 
 for script in online-start.sh online-stop.sh; do
     cp -f "$deploy_dir/$script" "$state_dir/$script"

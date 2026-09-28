@@ -1,4 +1,5 @@
 #include "online_window.h"
+#include "online_lobby_controls.h"
 #include "online_storage.h"
 
 #include "core/model/card.h"
@@ -123,7 +124,7 @@ QJsonObject visibleView(const QJsonObject& incoming) {
 }
 
 QPushButton* makeButton(const QString& text, QWidget* parent) {
-    auto* button = new QPushButton(text, parent);
+    auto* button = new OnlineButton(text, parent);
     button->setAccessibleName(text);
     return button;
 }
@@ -567,6 +568,8 @@ void OnlineWindow::handleOk(const QString& originalType, const QJsonObject& payl
         showLobby();
     } else if (originalType == QStringLiteral("invite")) {
         announce(QStringLiteral("邀请已发送"));
+    } else if (originalType == QStringLiteral("invite_bots")) {
+        announce(QStringLiteral("机器人已补齐空位"));
     } else if (originalType == QStringLiteral("set_password")
                || originalType == QStringLiteral("set_turn_seconds")) {
         announce(QStringLiteral("房间设置已更新"));
@@ -638,13 +641,33 @@ QString OnlineWindow::roomDescription(const QJsonObject& summary) const {
 
 void OnlineWindow::refreshLobby(const QJsonArray& rooms) {
     if (rooms.isEmpty()) return;
+    const std::vector<QJsonObject> sortedRooms = sortedLobbyRooms(rooms, playerCount_);
+    if (sortedRooms.empty()) return;
     const QString selectedId = lobbyList_->currentItem()
         ? lobbyList_->currentItem()->data(Qt::UserRole).toString() : QString();
-    roomSummaries_ = rooms;
+    roomSummaries_ = {};
+    bool sameRooms = lobbyList_->count() == static_cast<int>(sortedRooms.size());
+    for (int i = 0; i < static_cast<int>(sortedRooms.size()); ++i) {
+        const QString id = sortedRooms[i].value(QStringLiteral("room_id")).toString();
+        roomSummaries_.append(sortedRooms[i]);
+        if (sameRooms && lobbyList_->item(i)->data(Qt::UserRole).toString() != id)
+            sameRooms = false;
+    }
+    if (sameRooms) {
+        for (int i = 0; i < static_cast<int>(sortedRooms.size()); ++i) {
+            auto* item = lobbyList_->item(i);
+            const QString description = roomDescription(sortedRooms[i]);
+            if (item->text() != description) {
+                item->setText(description);
+                item->setToolTip(description);
+            }
+        }
+        return;
+    }
     lobbyList_->clear();
     int selectedRow = 0;
-    for (int i = 0; i < rooms.size(); ++i) {
-        const QJsonObject summary = rooms[i].toObject();
+    for (int i = 0; i < static_cast<int>(sortedRooms.size()); ++i) {
+        const QJsonObject& summary = sortedRooms[i];
         auto* item = new QListWidgetItem(roomDescription(summary), lobbyList_);
         const QString id = summary.value(QStringLiteral("room_id")).toString();
         item->setData(Qt::UserRole, id);
@@ -659,7 +682,6 @@ void OnlineWindow::navigateRoom(int direction) {
     const int current = std::max(0, lobbyList_->currentRow());
     const int next = (current + direction + lobbyList_->count()) % lobbyList_->count();
     lobbyList_->setCurrentRow(next);
-    announce(lobbyList_->item(next)->text(), AnnouncementCategory::Focus);
 }
 
 void OnlineWindow::joinSelectedRoom(const QString& invitationId) {
@@ -1098,14 +1120,23 @@ void OnlineWindow::showSettingsDialog() {
     const bool waiting = roomView_.value(QStringLiteral("status")).toString() == QStringLiteral("waiting");
     auto* inviteAll = makeButton(QStringLiteral("向全服发邀请"), &dialog);
     auto* inviteTarget = makeButton(QStringLiteral("邀请指定玩家"), &dialog);
+    auto* inviteBots = makeButton(QStringLiteral("邀请机器人补齐空位"), &dialog);
+    inviteBots->setEnabled(host && waiting
+        && roomView_.value(QStringLiteral("occupied")).toInt()
+            < roomView_.value(QStringLiteral("player_count")).toInt());
     layout->addWidget(inviteAll);
     layout->addWidget(inviteTarget);
+    layout->addWidget(inviteBots);
     connect(inviteAll, &QPushButton::clicked, &dialog, [this]() {
         send(QStringLiteral("invite"), {{QStringLiteral("scope"), QStringLiteral("all")}}, true);
     });
     connect(inviteTarget, &QPushButton::clicked, &dialog, [this, &dialog]() {
         dialog.accept();
         send(QStringLiteral("list_players"));
+    });
+    connect(inviteBots, &QPushButton::clicked, &dialog, [this, &dialog]() {
+        dialog.accept();
+        send(QStringLiteral("invite_bots"), {}, true);
     });
     auto* acceptInvites = new QCheckBox(QStringLiteral("接收邀请"), &dialog);
     acceptInvites->setChecked(acceptsInvites_);

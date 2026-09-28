@@ -37,6 +37,19 @@ constexpr int kMaxMessageBytes = 16 * 1024;
 QHash<QString, QString> nicknames;
 QHash<QString, QString> publicIds;
 QHash<QString, QString> accountsByPublicId;
+const QString kBotPrefix = QStringLiteral("@bot:");
+
+bool isBotSeat(const QString& seat) { return seat.startsWith(kBotPrefix); }
+
+QString botSeat(const QString& roomId, int number) {
+    return kBotPrefix + roomId + QLatin1Char(':') + QString::number(number);
+}
+
+QString firstHumanSeat(const QStringList& seats) {
+    for (const QString& seat : seats)
+        if (!isBotSeat(seat)) return seat;
+    return {};
+}
 
 struct Client {
     QString account;
@@ -170,7 +183,10 @@ QJsonObject viewFor(const Room& room, const QString& account) {
     QJsonArray seats;
     for (int i = 0; i < room.playerCount; ++i) {
         const QString username = i < room.seats.size() ? room.seats[i] : QString();
-        QJsonObject seat{{"index", i}, {"nickname", nicknames.value(username)},
+        const QString nickname = isBotSeat(username)
+            ? QStringLiteral("机器人 %1").arg(username.section(QLatin1Char(':'), -1))
+            : nicknames.value(username);
+        QJsonObject seat{{"index", i}, {"nickname", nickname},
                          {"short_id", publicIds.value(username)}};
         if (room.status != QStringLiteral("waiting") && i < room.seats.size()) {
             const auto& state = room.engine.publicSnapshot().players[i];
@@ -339,7 +355,7 @@ public:
                 if (room.status == QStringLiteral("playing"))
                     room.deadlineMs = nowMs() + 30000;
                 for (const QString& seat : room.seats)
-                    disconnectedAt_.insert(seat, nowMs());
+                    if (!isBotSeat(seat)) disconnectedAt_.insert(seat, nowMs());
                 rooms_.insert(room.id, room);
             }
         }
@@ -427,6 +443,11 @@ private:
         for (auto it = clients_.cbegin(); it != clients_.cend(); ++it)
             if (it.value().account == account) return it.key();
         return nullptr;
+    }
+
+    bool connectedInRoom(const QString& account, const QString& roomId) const {
+        QWebSocket* socket = connectedAccount(account);
+        return socket && clients_.value(socket).room == roomId;
     }
 
     bool persist(const Room& candidate, const QString& account,
@@ -800,6 +821,7 @@ private:
         }
         const bool changesRoom = type == QStringLiteral("join") || type == QStringLiteral("leave") ||
             type == QStringLiteral("set_password") || type == QStringLiteral("set_turn_seconds") ||
+            type == QStringLiteral("invite_bots") ||
             type == QStringLiteral("start") || type == QStringLiteral("bid") ||
             type == QStringLiteral("play") || type == QStringLiteral("pass");
         if (changesRoom && request.value("seq").toString() != QString::number(room.seq)) {
@@ -863,7 +885,7 @@ private:
                 if (next.host == client.account) {
                     next.host.clear();
                     for (const QString& seat : next.seats) {
-                        if (seat != client.account && connectedAccount(seat)) {
+                        if (seat != client.account && connectedInRoom(seat, room.id)) {
                             next.host = seat;
                             break;
                         }
@@ -871,13 +893,14 @@ private:
                 }
             } else {
                 next.seats.removeAll(client.account);
-                if (next.host == client.account)
-                    next.host = next.seats.isEmpty() ? QString() : next.seats.first();
+                if (next.host == client.account || next.host.isEmpty())
+                    next.host = firstHumanSeat(next.seats);
                 if (next.status == QStringLiteral("finished")) {
                     next.status = QStringLiteral("waiting");
                     next.roundId.clear(); next.engine = GameEngine();
                 }
-                if (next.seats.isEmpty()) {
+                if (next.host.isEmpty()) {
+                    next.seats.clear();
                     next.recentMessages = QJsonArray();
                     next.passwordHash.clear();
                     next.turnSeconds = 15;
@@ -889,6 +912,24 @@ private:
             next.seq++;
             commitRoom(socket, requestId, room, std::move(next), client.account);
             if (!room.paused) client.room.clear();
+            return;
+        }
+        if (type == QStringLiteral("invite_bots")) {
+            if (room.host != client.account) {
+                error(socket, requestId, &room, QStringLiteral("host_required")); return;
+            }
+            if (room.status != QStringLiteral("waiting") ||
+                room.seats.size() >= room.playerCount) {
+                error(socket, requestId, &room, QStringLiteral("room_full")); return;
+            }
+            Room next = room;
+            int number = 1;
+            for (const QString& seat : next.seats)
+                if (isBotSeat(seat)) ++number;
+            while (next.seats.size() < next.playerCount)
+                next.seats.append(botSeat(next.id, number++));
+            next.seq++;
+            commitRoom(socket, requestId, room, std::move(next), client.account);
             return;
         }
         if (type == QStringLiteral("set_password")) {
@@ -1026,7 +1067,7 @@ private:
             if (!result.success) { error(socket, requestId, &room, QStringLiteral("engine_rejected")); return; }
             next.roundId = QUuid::createUuid().toString(QUuid::WithoutBraces);
             next.status = QStringLiteral("playing");
-            next.autoUsed = false;
+            next.autoUsed = std::any_of(next.seats.cbegin(), next.seats.cend(), isBotSeat);
         } else {
             if (room.status != QStringLiteral("playing")) {
                 error(socket, requestId, &room, QStringLiteral("not_playing")); return;
@@ -1137,7 +1178,7 @@ private:
                 Room next = room;
                 bool changed = false;
                 for (const QString& seat : room.seats) {
-                    if (!connectedAccount(seat) &&
+                    if (!isBotSeat(seat) && !connectedInRoom(seat, room.id) &&
                         (exitAfterRound_.contains(seat) ||
                          time - disconnectedAt_.value(seat, time) >= 30000)) {
                         next.seats.removeAll(seat);
@@ -1147,10 +1188,11 @@ private:
                     }
                 }
                 if (changed) {
+                    if (firstHumanSeat(next.seats).isEmpty()) next.seats.clear();
                     if (!next.seats.contains(next.host)) {
                         next.host.clear();
                         for (const QString& seat : next.seats)
-                            if (connectedAccount(seat)) { next.host = seat; break; }
+                            if (connectedInRoom(seat, room.id)) { next.host = seat; break; }
                     }
                     next.status = QStringLiteral("waiting");
                     next.roundId.clear(); next.engine = GameEngine(); next.deadlineMs = 0;
@@ -1168,7 +1210,8 @@ private:
             bool anyOnline = false;
             qint64 lastDisconnect = 0;
             for (const QString& seat : room.seats) {
-                if (connectedAccount(seat)) anyOnline = true;
+                if (isBotSeat(seat)) continue;
+                if (connectedInRoom(seat, room.id)) anyOnline = true;
                 else lastDisconnect = std::max(lastDisconnect, disconnectedAt_.value(seat, time));
             }
             if (!anyOnline) {
@@ -1186,10 +1229,33 @@ private:
                 } else room.paused = true;
                 continue;
             }
-            if (room.deadlineMs > time) continue;
             const PlayerId actor = room.engine.fullState().currentPlayer;
             const QString account = room.seats.value(int(actor));
-            if (!connectedAccount(account) &&
+            const bool invitedBot = isBotSeat(account);
+            if (!invitedBot && room.deadlineMs > time) continue;
+            if (invitedBot) {
+                if (botTasks_.size() >= 4) continue;
+                const GamePhase phase = room.engine.state().phase();
+                if (phase != GamePhase::Bidding && phase != GamePhase::Playing) {
+                    room.paused = true; qWarning("bot_invalid_phase"); continue;
+                }
+                AiObservation observation = makeAiObservation(room.engine.state(), actor);
+                if (!observation.fullInformation.available) {
+                    room.paused = true; qWarning("invited_bot_observation_invalid"); continue;
+                }
+                BotTask task;
+                task.roundId = room.roundId;
+                task.seq = room.seq;
+                task.actor = actor;
+                task.result = std::async(std::launch::async, [observation]() mutable {
+                    StandardAiPlayer ai(AiDifficulty::Beginner, AiInformationMode::FullInformation);
+                    return observation.phase == GamePhase::Bidding
+                        ? ai.decideBid(observation) : ai.decidePlay(observation);
+                }).share();
+                botTasks_.insert(room.id, std::move(task));
+                continue;
+            }
+            if (!connectedInRoom(account, room.id) &&
                 time - disconnectedAt_.value(account, time) < 30000) continue;
             GameCommand command;
             command.playerId = actor;
@@ -1261,7 +1327,7 @@ int main(int argc, char** argv) {
         db.setDatabaseName(qEnvironmentVariable("FPDZ_DB_NAME", "fpdz_online"));
         db.setUserName(qEnvironmentVariable("FPDZ_DB_USER", "fpdz_online"));
         db.setPassword(qEnvironmentVariable("FPDZ_DB_PASSWORD"));
-        QJsonObject report{{"build_version", QStringLiteral("2.3")},
+        QJsonObject report{{"build_version", QStringLiteral("2.4")},
                            {"database_open", db.open()}};
         if (db.isOpen()) {
             QSqlQuery rooms(db);

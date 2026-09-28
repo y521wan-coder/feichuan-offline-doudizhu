@@ -1,5 +1,5 @@
 #!/bin/sh
-# Start the 2.3 online service pod as the dedicated unprivileged user.
+# Start the 2.4 online service pod as the dedicated unprivileged user.
 # Idempotent: safe to run at boot, after a crash, or by hand.
 set -eu
 
@@ -38,7 +38,7 @@ if ! podman container exists fpdz-online-server; then
         --env-file "$state_dir/server.env" \
         --read-only --tmpfs /tmp --security-opt no-new-privileges --cap-drop ALL \
         --pids-limit 256 --memory 512m \
-        localhost/fpdz-online-production:2.3 >/dev/null
+        localhost/fpdz-online-production:2.4 >/dev/null
 fi
 podman start fpdz-online-server >/dev/null 2>&1 || true
 

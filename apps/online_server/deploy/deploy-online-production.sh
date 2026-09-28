@@ -1,5 +1,5 @@
 #!/bin/bash
-# Administrator-side production setup for the 2.3 online service.
+# Administrator-side production setup for the 2.4 online service.
 # Run as root on the Debian 12 host:  bash deploy-online-production.sh
 # Everything the service itself does afterwards runs as fpdz_online (no sudo).
 set -euo pipefail
