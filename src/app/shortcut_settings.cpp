@@ -112,7 +112,7 @@ void ShortcutSettings::normalize() {
     for (std::size_t i = 0; i < ActionCount; ++i) {
         m_bindings[i] = fromKeyEvent(m_bindings[i].key, m_bindings[i].modifiers);
         const quint64 identity = (static_cast<quint64>(static_cast<quint32>(m_bindings[i].key)) << 32) |
-            static_cast<quint32>(m_bindings[i].modifiers.toInt());
+            static_cast<quint32>(static_cast<int>(m_bindings[i].modifiers));
         if (!isValidBinding(m_bindings[i]) || used.contains(identity)) {
             invalid = true;
             break;
@@ -131,7 +131,7 @@ QJsonObject ShortcutSettings::toJson() const {
         const auto& value = normalized.m_bindings[i];
         QJsonObject bindingJson;
         bindingJson.insert(QStringLiteral("key"), value.key);
-        bindingJson.insert(QStringLiteral("modifiers"), value.modifiers.toInt());
+        bindingJson.insert(QStringLiteral("modifiers"), static_cast<int>(value.modifiers));
         json.insert(actionId(action), bindingJson);
     }
     return json;
@@ -297,7 +297,7 @@ bool ShortcutSettings::isValidBinding(const ShortcutBinding& input) {
 }
 
 QKeySequence ShortcutSettings::keySequence(const ShortcutBinding& binding) {
-    return QKeySequence(binding.key | binding.modifiers.toInt());
+    return QKeySequence(binding.key | static_cast<int>(binding.modifiers));
 }
 
 ShortcutBinding ShortcutSettings::fromKeyEvent(

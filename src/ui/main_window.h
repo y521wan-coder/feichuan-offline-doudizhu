@@ -26,6 +26,11 @@
 #include "../ai/ai_decision_request.h"
 class QShortcut;
 namespace fpdz {
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+using NativeEventResult = qintptr;
+#else
+using NativeEventResult = long;
+#endif
 class GameEngine;
 class HandListModel;
 class PlayerStatusModel;
@@ -55,9 +60,9 @@ signals:
 protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
     bool focusNextPrevChild(bool next) override;
-    bool nativeEventFilter(const QByteArray& eventType, void* message, qintptr* result) override;
+    bool nativeEventFilter(const QByteArray& eventType, void* message, NativeEventResult* result) override;
     void keyPressEvent(QKeyEvent* event) override;
-    bool nativeEvent(const QByteArray& eventType, void* message, qintptr* result) override;
+    bool nativeEvent(const QByteArray& eventType, void* message, NativeEventResult* result) override;
     void closeEvent(QCloseEvent* event) override;
 private slots:
     void onAiTurn();
@@ -118,7 +123,7 @@ private:
     void executeAiPlayCommand(const GameCommand& command);
     void handleAutoPassTimeout();
     bool handleKeyPress(QKeyEvent* event);
-    bool handleWindowsMessage(void* message, qintptr* result);
+    bool handleWindowsMessage(void* message, NativeEventResult* result);
     bool handleNativeShortcut(unsigned int virtualKey, bool ctrlDown, bool shiftDown,
                               bool altDown, unsigned int scanCode);
     void traceKeyboardEvent(const QString& source, unsigned int key, unsigned int scanCode,

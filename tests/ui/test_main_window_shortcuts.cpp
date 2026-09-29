@@ -60,6 +60,14 @@
 
 using namespace fpdz;
 
+static void openMenuForTest(QMenu* menu) {
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
+    menu->popup(QCursor::pos());
+#else
+    menu->menuAction()->trigger();
+#endif
+}
+
 class TestMainWindowShortcuts : public QObject {
     Q_OBJECT
 
@@ -97,7 +105,9 @@ private slots:
         for (const QAccessibleEvent* event : QTestAccessibility::events()) {
             if (event->object() != aiBattle) continue;
             if (event->type() == QAccessible::Focus) ++aiBattleFocusEvents;
+#if QT_VERSION >= QT_VERSION_CHECK(6, 8, 0)
             if (event->type() == QAccessible::Announcement) ++explicitAnnouncements;
+#endif
         }
         QCOMPARE(aiBattleFocusEvents, 1);
         QCOMPARE(explicitAnnouncements, 0);
@@ -419,9 +429,11 @@ private slots:
             if (event->type() == QAccessible::Focus && event->object() == statusLabel) {
                 ++focusEventCount;
             }
+#if QT_VERSION >= QT_VERSION_CHECK(6, 8, 0)
             if (event->type() == QAccessible::Announcement) {
                 ++announcementEventCount;
             }
+#endif
         }
         QCOMPARE(focusEventCount, 1);
         QCOMPARE(announcementEventCount, 0);
@@ -481,6 +493,7 @@ private slots:
             if (event->type() == QAccessible::Focus && event->object() == statusLabel) {
                 ++focusEventCount;
             }
+#if QT_VERSION >= QT_VERSION_CHECK(6, 8, 0)
             if (event->type() != QAccessible::Announcement ||
                 event->object() != statusLabel) {
                 continue;
@@ -491,9 +504,15 @@ private slots:
             QCOMPARE(narratorEvent->message(), QString::fromUtf8(u8"讲述人公告测试"));
             QCOMPARE(narratorEvent->politeness(),
                      QAccessible::AnnouncementPoliteness::Assertive);
+#endif
         }
+#if QT_VERSION >= QT_VERSION_CHECK(6, 8, 0)
         QCOMPARE(focusEventCount, 0);
         QCOMPARE(announcementEventCount, 1);
+#else
+        QCOMPARE(focusEventCount, 1);
+        QCOMPARE(announcementEventCount, 0);
+#endif
         QCOMPARE(statusLabel->accessibleName(), QString::fromUtf8(u8"讲述人公告测试"));
         QCOMPARE(QApplication::focusWidget(), focusBefore);
         QCOMPARE(QString::fromStdWString(accessibility.backendName()),
@@ -1306,9 +1325,9 @@ private slots:
         QVERIFY(playerNamesMenuAction);
         QVERIFY(playerNamesMenu->title().contains(QString::fromUtf8(u8"玩家名称设置")));
         QVERIFY(playerNamesMenu->actions().size() >= 5);
-        settingsMenu->menuAction()->trigger();
+        openMenuForTest(settingsMenu);
         QTRY_COMPARE(qobject_cast<QMenu*>(QApplication::activePopupWidget()), settingsMenu);
-        playerNamesMenuAction->trigger();
+        openMenuForTest(playerNamesMenu);
         QTRY_COMPARE(qobject_cast<QMenu*>(QApplication::activePopupWidget()), playerNamesMenu);
         QTest::keyClick(playerNamesMenu, Qt::Key_Escape);
         QTest::keyClick(settingsMenu, Qt::Key_Escape);
@@ -1718,7 +1737,7 @@ private slots:
         auto* settingsMenu = window.findChild<QMenu*>(QStringLiteral("settingsMenu"));
         QVERIFY(settingsMenu);
 
-        settingsMenu->menuAction()->trigger();
+        openMenuForTest(settingsMenu);
         QTRY_COMPARE(qobject_cast<QMenu*>(QApplication::activePopupWidget()), settingsMenu);
         QTest::keyClick(settingsMenu, Qt::Key_F1);
 
@@ -1764,7 +1783,7 @@ private slots:
         auto* settingsMenu = window.findChild<QMenu*>(QStringLiteral("settingsMenu"));
         QVERIFY(settingsMenu);
 
-        settingsMenu->menuAction()->trigger();
+        openMenuForTest(settingsMenu);
         QTRY_COMPARE(qobject_cast<QMenu*>(QApplication::activePopupWidget()), settingsMenu);
 
         constexpr UINT keyboardHookMessage = WM_APP + 0x4F;
@@ -1792,7 +1811,7 @@ private slots:
 
         auto* settingsMenu = window.findChild<QMenu*>(QStringLiteral("settingsMenu"));
         QVERIFY(settingsMenu);
-        settingsMenu->menuAction()->trigger();
+        openMenuForTest(settingsMenu);
         QTRY_COMPARE(qobject_cast<QMenu*>(QApplication::activePopupWidget()), settingsMenu);
 
         bool sawSettingsDialog = false;

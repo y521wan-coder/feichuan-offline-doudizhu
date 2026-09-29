@@ -45,7 +45,16 @@ if ($projectRoot -notmatch '^[\x00-\x7F]+$') {
 }
 
 try {
-    $vcvars = "C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\VC\Auxiliary\Build\vcvarsall.bat"
+    $vcvars = if ($Preset -eq 'win7-x64') {
+        "C:\Program Files (x86)\Microsoft Visual Studio\2019\BuildTools\VC\Auxiliary\Build\vcvarsall.bat"
+    } else {
+        "C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\VC\Auxiliary\Build\vcvarsall.bat"
+    }
+    # A release package configures both toolchains in one PowerShell process.
+    # vcvarsall skips initialization when it inherits another VS environment.
+    Get-ChildItem Env: | Where-Object {
+        $_.Name -match '^(VSCMD_|VSINSTALLDIR$|VCINSTALLDIR$|VCTools|VisualStudioVersion$|WindowsSdk|WindowsSDK|UniversalCRT|UCRTVersion$|INCLUDE$|LIB$|LIBPATH$|DevEnvDir$|FrameworkDir$|FrameworkVersion$|NETFXSDKDir$|Platform$|__VSCMD)'
+    } | ForEach-Object { Remove-Item -LiteralPath ("Env:\" + $_.Name) }
     $bootstrapPath = "C:\Windows\System32;C:\Windows;C:\Windows\System32\Wbem"
     $env:PATH = $bootstrapPath
     cmd /c "`"$vcvars`" x64 >nul 2>&1 && set" | ForEach-Object {

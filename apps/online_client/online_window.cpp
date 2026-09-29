@@ -3,8 +3,13 @@
 #include "online_storage.h"
 
 #include "core/model/card.h"
+#include "core/engine/game_phase.h"
 #include "core/rules/pattern_analyzer.h"
+#include "core/rules/pattern_comparator.h"
 #include "core/text/card_text_formatter.h"
+#include "ai/legal_move_generator.h"
+#include "ui/models/hand_list_model.h"
+#include "ui/widgets/card_table_widget.h"
 
 #include <QApplication>
 #include <QCheckBox>
@@ -22,17 +27,19 @@
 #include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
+#include <QListView>
 #include <QListWidget>
 #include <QMessageBox>
 #include <QPushButton>
 #include <QRegularExpression>
+#include <QSignalBlocker>
 #include <QShortcut>
-#include <QSpinBox>
 #include <QStackedWidget>
 #include <QVBoxLayout>
 #include <QUuid>
 #include <QWebSocketProtocol>
 #include <algorithm>
+#include <optional>
 #include <vector>
 #include <windows.h>
 #include <mmsystem.h>
@@ -130,12 +137,13 @@ QPushButton* makeButton(const QString& text, QWidget* parent) {
 }
 } // namespace
 
-OnlineWindow::OnlineWindow(QWidget* parent) : QWidget(parent) {
+OnlineWindow::OnlineWindow(QWidget* parent, bool connectOnStart) : QWidget(parent) {
     setWindowTitle(QStringLiteral("飞船斗地主 在线真人版"));
     resize(800, 660);
     setMinimumSize(620, 500);
-    sound_.initialize();
+    if (connectOnStart) sound_.initialize();
     buildUi();
+    for (auto* widget : findChildren<QWidget*>()) widget->installEventFilter(this);
     const auto roomShortcut = [this](Qt::Key key, auto action) {
         auto* shortcut = new QShortcut(QKeySequence(key), this);
         shortcut->setContext(Qt::WindowShortcut);
@@ -160,7 +168,12 @@ OnlineWindow::OnlineWindow(QWidget* parent) : QWidget(parent) {
     connect(&socket_, &QWebSocket::disconnected, this, [this]() { onDisconnected(); });
     connect(&socket_, &QWebSocket::textMessageReceived, this,
             [this](const QString& raw) { receive(raw); });
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
     connect(&socket_, &QWebSocket::errorOccurred, this, [this](QAbstractSocket::SocketError) {
+#else
+    connect(&socket_, QOverload<QAbstractSocket::SocketError>::of(&QWebSocket::error),
+            this, [this](QAbstractSocket::SocketError) {
+#endif
         lastError_ = QStringLiteral("network_error");
         connectionLabel_->setText(QStringLiteral("联机服务器连接失败，离线单机和 AI 对战仍可从模式选择进入"));
         announce(QStringLiteral("联机服务器连接失败。可以返回模式选择。"),
@@ -182,10 +195,12 @@ OnlineWindow::OnlineWindow(QWidget* parent) : QWidget(parent) {
         announce(queuedChatAnnouncements_.takeFirst());
         if (queuedChatAnnouncements_.isEmpty()) chatAnnouncementTimer_.stop();
     });
-    token_ = OnlineStorage::readSession();
-    remember_ = !token_.isEmpty();
-    rememberCheck_->setChecked(remember_);
-    connectServer();
+    if (connectOnStart) {
+        token_ = OnlineStorage::readSession();
+        remember_ = !token_.isEmpty();
+        rememberCheck_->setChecked(remember_);
+        connectServer();
+    }
 }
 
 OnlineWindow::~OnlineWindow() {
@@ -350,37 +365,47 @@ QWidget* OnlineWindow::buildRoomPage() {
     auto* keys = new QLabel(QStringLiteral("F1 开局，F2 已公开底牌，F3 表情，F4 房内消息，F5 在线设置"), page);
     keys->setWordWrap(true);
     layout->addWidget(keys);
-    handList_ = new QListWidget(page);
-    handList_->setAccessibleName(QStringLiteral("我的手牌，方向键浏览，空格选牌，回车出牌"));
-    handList_->installEventFilter(this);
-    layout->addWidget(handList_, 1);
+    cardTable_ = new CardTableWidget(page);
+    layout->addWidget(cardTable_, 1);
+    handModel_ = std::make_unique<HandListModel>();
+    handView_ = new QListView(page);
+    handView_->setAccessibleName(QStringLiteral("手牌"));
+    handView_->setFocusPolicy(Qt::StrongFocus);
+    handView_->setModel(handModel_.get());
+    handView_->setSelectionMode(QAbstractItemView::NoSelection);
+    handView_->setFlow(QListView::LeftToRight);
+    handView_->setWrapping(true);
+    handView_->setMinimumHeight(120);
+    handView_->setSpacing(5);
+    layout->addWidget(handView_);
+    connect(handModel_.get(), &QAbstractItemModel::dataChanged, this,
+            [this]() { refreshSelection(); });
     previewLabel_ = new QLabel(QStringLiteral("尚未选牌"), page);
     previewLabel_->setWordWrap(true);
     layout->addWidget(previewLabel_);
     auto* actions = new QHBoxLayout;
-    bidSpin_ = new QSpinBox(page);
-    bidSpin_->setRange(0, 3);
-    bidSpin_->setAccessibleName(QStringLiteral("叫分，零分表示不叫"));
-    actions->addWidget(bidSpin_);
-    auto* bidButton = makeButton(QStringLiteral("叫分"), page);
-    auto* playButton = makeButton(QStringLiteral("出所选牌"), page);
-    auto* passButton = makeButton(QStringLiteral("过牌"), page);
+    bidButton_ = makeButton(QStringLiteral("叫分选择"), page);
+    playButton_ = makeButton(QStringLiteral("出牌(&E)"), page);
+    passButton_ = makeButton(QStringLiteral("过牌(&P)"), page);
+    hintButton_ = makeButton(QStringLiteral("提示(&H)"), page);
+    playButton_->setAccessibleName(QStringLiteral("出牌"));
+    passButton_->setAccessibleName(QStringLiteral("过牌"));
+    hintButton_->setAccessibleName(QStringLiteral("出牌提示"));
     auto* leaveButton = makeButton(QStringLiteral("离开房间"), page);
-    actions->addWidget(bidButton);
-    actions->addWidget(playButton);
-    actions->addWidget(passButton);
+    actions->addWidget(bidButton_);
+    actions->addWidget(playButton_);
+    actions->addWidget(passButton_);
+    actions->addWidget(hintButton_);
     actions->addWidget(leaveButton);
     layout->addLayout(actions);
-    connect(bidButton, &QPushButton::clicked, this, [this]() { bid(); });
-    connect(playButton, &QPushButton::clicked, this, [this]() { playSelected(); });
-    connect(passButton, &QPushButton::clicked, this, [this]() { pass(); });
+    playButton_->setFocusPolicy(Qt::NoFocus);
+    passButton_->setFocusPolicy(Qt::NoFocus);
+    hintButton_->setFocusPolicy(Qt::NoFocus);
+    connect(bidButton_, &QPushButton::clicked, this, [this]() { bid(); });
+    connect(playButton_, &QPushButton::clicked, this, [this]() { playSelected(); });
+    connect(passButton_, &QPushButton::clicked, this, [this]() { pass(); });
+    connect(hintButton_, &QPushButton::clicked, this, [this]() { showHint(); });
     connect(leaveButton, &QPushButton::clicked, this, [this]() { leaveRoom(); });
-    connect(handList_, &QListWidget::itemClicked, this, [this](QListWidgetItem* item) {
-        const int id = item->data(Qt::UserRole).toInt();
-        if (selectedCards_.contains(id)) selectedCards_.remove(id);
-        else selectedCards_.insert(id);
-        refreshHand(roomView_.value(QStringLiteral("hand")).toArray());
-    });
     return page;
 }
 
@@ -405,6 +430,7 @@ void OnlineWindow::onConnected() {
 
 void OnlineWindow::onDisconnected() {
     if (closing_) return;
+    if (bidDialog_) bidDialog_->reject();
     connectionLabel_->setText(QStringLiteral("连接中断，正在尝试重连；也可返回模式选择"));
     announce(QStringLiteral("联机连接中断，正在重连"), AnnouncementCategory::Error,
              AnnouncementPriority::High);
@@ -565,6 +591,7 @@ void OnlineWindow::handleOk(const QString& originalType, const QJsonObject& payl
         announce(QStringLiteral("已加入 %1 房间").arg(roomId_));
     } else if (originalType == QStringLiteral("leave")) {
         roomId_.clear(); roundId_.clear(); seq_.clear(); roomView_ = {};
+        refreshHand({});
         showLobby();
     } else if (originalType == QStringLiteral("invite")) {
         announce(QStringLiteral("邀请已发送"));
@@ -626,7 +653,7 @@ void OnlineWindow::showLobby() {
 void OnlineWindow::showRoom() {
     roomListTimer_.stop();
     pages_->setCurrentIndex(3);
-    handList_->setFocus();
+    handView_->setFocus();
 }
 
 QString OnlineWindow::roomDescription(const QJsonObject& summary) const {
@@ -722,6 +749,7 @@ void OnlineWindow::refreshRoom(const QJsonObject& view) {
     const QJsonObject previousView = roomView_;
     roomId_ = receivedRoom;
     roomView_ = visibleView(view);
+    playerCount_ = view.value(QStringLiteral("player_count")).toInt(playerCount_);
     selfSeat_ = view.value(QStringLiteral("self_seat")).toInt(-1);
     const QJsonArray hand = view.value(QStringLiteral("hand")).toArray();
     if (selfSeat_ >= 0 && !view.contains(QStringLiteral("hand"))
@@ -740,6 +768,17 @@ void OnlineWindow::refreshRoom(const QJsonObject& view) {
     const bool myTurn = turn == selfSeat_ && selfSeat_ >= 0;
     const bool changedSeq = previousView.value(QStringLiteral("seq")).toString()
         != roomView_.value(QStringLiteral("seq")).toString();
+    const bool myBiddingTurn = status == QStringLiteral("playing") && phase == 2 && myTurn;
+    const bool myPlayingTurn = status == QStringLiteral("playing") && phase == 4 && myTurn;
+    const QString bidTurn = roundId_ + QLatin1Char(':')
+        + roomView_.value(QStringLiteral("deadline_ms")).toString();
+    if (bidDialog_ && (!myBiddingTurn || lastBidPromptTurn_ != bidTurn))
+        bidDialog_->reject();
+    bidButton_->setVisible(myBiddingTurn);
+    playButton_->setEnabled(myPlayingTurn);
+    passButton_->setEnabled(myPlayingTurn
+        && !roomView_.value(QStringLiteral("last_played_cards")).toArray().isEmpty());
+    hintButton_->setEnabled(myPlayingTurn);
     if (changedSeq && status == QStringLiteral("playing")) {
         if (previousView.value(QStringLiteral("status")).toString() != QStringLiteral("playing"))
             sound_.play(SoundId::GameStart);
@@ -769,6 +808,7 @@ void OnlineWindow::refreshRoom(const QJsonObject& view) {
             details += QStringLiteral("；你的得分变化 %1").arg(scores[selfSeat_].toString());
     }
     roomStatus_->setText(details);
+    seatList_->setVisible(status == QStringLiteral("waiting"));
     seatList_->clear();
     for (const QJsonValue& value : view.value(QStringLiteral("seats")).toArray()) {
         const QJsonObject seat = value.toObject();
@@ -814,10 +854,19 @@ void OnlineWindow::refreshRoom(const QJsonObject& view) {
                  AnnouncementPriority::High);
         sound_.play(SoundId::YourTurn);
     }
+    if (myBiddingTurn && lastBidPromptTurn_ != bidTurn) {
+        lastBidPromptTurn_ = bidTurn;
+        QTimer::singleShot(0, this, [this, bidTurn]() {
+            if (roomId_.isEmpty() || roundId_ + QLatin1Char(':')
+                    + roomView_.value(QStringLiteral("deadline_ms")).toString() != bidTurn)
+                return;
+            bid();
+        });
+    }
 }
 
 void OnlineWindow::refreshHand(const QJsonArray& ids) {
-    const int previous = handList_->currentRow();
+    const int previous = handView_->currentIndex().row();
     std::vector<Card> cards;
     cards.reserve(size_t(ids.size()));
     QSet<int> present;
@@ -827,57 +876,311 @@ void OnlineWindow::refreshHand(const QJsonArray& ids) {
         Card card = Card::create(CardId(id));
         if (card.isValid()) { cards.push_back(card); present.insert(id); }
     }
-    std::stable_sort(cards.begin(), cards.end(), [](const Card& a, const Card& b) {
-        if (a.weight() != b.weight()) return a.weight() < b.weight();
-        if (a.suit() != b.suit()) return a.suit() < b.suit();
-        return a.deckIndex() < b.deckIndex();
-    });
-    for (auto it = selectedCards_.begin(); it != selectedCards_.end();) {
-        if (!present.contains(*it)) it = selectedCards_.erase(it);
-        else ++it;
+    const bool changed = handModel_->setCards(cards);
+    if (handModel_->rowCount() > 0 && (changed || !handView_->currentIndex().isValid())) {
+        const int row = previous >= 0
+            ? std::clamp(previous, 0, handModel_->rowCount() - 1)
+            : handModel_->firstUnselectedRow();
+        handView_->setCurrentIndex(handModel_->index(row, 0));
     }
-    handList_->clear();
-    std::vector<Card> selected;
-    for (const Card& card : cards) {
-        const bool picked = selectedCards_.contains(card.id());
-        QString text = QString::fromStdWString(CardTextFormatter::formatCard(card));
-        if (picked) { text.prepend(QStringLiteral("已选，")); selected.push_back(card); }
-        auto* item = new QListWidgetItem(text, handList_);
-        item->setData(Qt::UserRole, int(card.id()));
+    refreshSelection();
+}
+
+void OnlineWindow::refreshSelection() {
+    if (!handModel_) return;
+    const auto selected = handModel_->selectedCards();
+    if (selected.empty()) {
+        previewLabel_->setText(QStringLiteral("尚未选牌"));
+    } else {
+        const CardPattern pattern = PatternAnalyzer::analyze(selected, playerCount_);
+        previewLabel_->setText(pattern.isValid()
+            ? QStringLiteral("已选 %1 张，牌型 %2").arg(selected.size()).arg(
+                  QString::fromStdWString(patternTypeName(pattern.type, playerCount_)))
+            : QStringLiteral("已选 %1 张，尚非合法牌型").arg(selected.size()));
     }
-    if (handList_->count() > 0) handList_->setCurrentRow(std::clamp(previous, 0, handList_->count() - 1));
-    if (selected.empty()) { previewLabel_->setText(QStringLiteral("尚未选牌")); return; }
+    refreshTable();
+}
+
+void OnlineWindow::refreshTable() {
+    if (!cardTable_ || !handModel_) return;
+    PublicGameSnapshot snapshot;
+    const int count = std::clamp(roomView_.value(QStringLiteral("player_count")).toInt(playerCount_),
+                                 2, PLAYER_COUNT);
+    const int ownSeat = selfSeat_ >= 0 && selfSeat_ < count ? selfSeat_ : 0;
+    snapshot.activePlayerCount = count;
+    snapshot.phase = roomView_.value(QStringLiteral("status")).toString() == QStringLiteral("waiting")
+        ? GamePhase::NotStarted
+        : static_cast<GamePhase>(roomView_.value(QStringLiteral("phase")).toInt());
+    const int actor = roomView_.value(QStringLiteral("current_player")).toInt(-1);
+    if (actor >= 0 && actor < count)
+        snapshot.currentPlayer = static_cast<PlayerId>((actor - ownSeat + count) % count);
+    const QJsonArray seats = roomView_.value(QStringLiteral("seats")).toArray();
+    for (int relative = 0; relative < count; ++relative) {
+        const int source = (ownSeat + relative) % count;
+        if (source >= seats.size()) continue;
+        const QJsonObject seat = seats[source].toObject();
+        auto& player = snapshot.players[relative];
+        player.id = static_cast<PlayerId>(relative);
+        player.name = seat.value(QStringLiteral("nickname")).toString().toStdWString();
+        player.remainingCards = seat.value(QStringLiteral("remaining")).toInt();
+        player.role = static_cast<Role>(seat.value(QStringLiteral("role")).toInt());
+        player.roleRevealed = roomView_.value(QStringLiteral("bottom_revealed")).toBool();
+        player.bidScore = seat.value(QStringLiteral("bid")).toInt();
+    }
+    const auto appendCards = [](const QJsonArray& ids, std::vector<Card>& target) {
+        for (const QJsonValue& value : ids) {
+            const int id = value.toInt(-1);
+            if (id >= 0 && id < TOTAL_CARDS) target.push_back(Card::create(CardId(id)));
+        }
+    };
+    snapshot.bottomCardsRevealed = roomView_.value(QStringLiteral("bottom_revealed")).toBool();
+    if (snapshot.bottomCardsRevealed)
+        appendCards(roomView_.value(QStringLiteral("bottom_cards")).toArray(), snapshot.bottomCards);
+    appendCards(roomView_.value(QStringLiteral("last_played_cards")).toArray(),
+                snapshot.lastPlayedCards);
+    snapshot.lastPlayedValid = !snapshot.lastPlayedCards.empty();
+    const int lastPlayer = roomView_.value(QStringLiteral("last_played_by")).toInt(-1);
+    if (lastPlayer >= 0 && lastPlayer < count)
+        snapshot.lastPlayedBy = static_cast<PlayerId>((lastPlayer - ownSeat + count) % count);
+    std::vector<Card> hand;
+    std::vector<CardId> selected;
+    for (int row = 0; row < handModel_->rowCount(); ++row) {
+        const Card card = handModel_->cardAt(row);
+        hand.push_back(card);
+        if (handModel_->isSelected(row)) selected.push_back(card.id());
+    }
+    cardTable_->setTableState(snapshot, hand, selected);
+}
+
+void OnlineWindow::moveHandCursorTo(int row) {
+    if (!handModel_ || !handView_ || !handView_->selectionModel()) return;
+    const QModelIndex index = handModel_->index(row, 0);
+    if (!index.isValid()) return;
+    handModel_->setAccessibilityTextSuppressed(false);
+    {
+        const QSignalBlocker blocker(handView_->selectionModel());
+        handView_->selectionModel()->setCurrentIndex(index, QItemSelectionModel::NoUpdate);
+    }
+    handView_->scrollTo(index, QAbstractItemView::EnsureVisible);
+    handView_->viewport()->update();
+    const QString spoken = handModel_->data(index, Qt::AccessibleTextRole).toString();
+    if (!spoken.isEmpty()) announce(spoken, AnnouncementCategory::CardNavigation,
+                                     AnnouncementPriority::Low);
+}
+
+void OnlineWindow::takeCurrentCard() {
+    if (!handModel_ || !handView_->currentIndex().isValid()) return;
+    handModel_->setAccessibilityTextSuppressed(true);
+    int row = handView_->currentIndex().row();
+    if (handModel_->isSelected(row)) {
+        const int next = handModel_->nextUnselectedRow(row);
+        if (next >= 0) row = next;
+    }
+    if (handModel_->isSelected(row) || !handModel_->selectSingle(row)) return;
+    handModel_->completeEndpointSelection(playerCount_, true);
+    const QModelIndex index = handModel_->index(row, 0);
+    {
+        const QSignalBlocker blocker(handView_->selectionModel());
+        handView_->selectionModel()->setCurrentIndex(index, QItemSelectionModel::NoUpdate);
+    }
+    handView_->scrollTo(index, QAbstractItemView::EnsureVisible);
+    handView_->viewport()->update();
+    sound_.play(SoundId::CardSelect);
+    const auto selected = handModel_->selectedCards();
     const CardPattern pattern = PatternAnalyzer::analyze(selected, playerCount_);
-    previewLabel_->setText(pattern.isValid()
-        ? QStringLiteral("已选 %1 张，牌型 %2").arg(selected.size()).arg(
-              QString::fromStdWString(patternTypeName(pattern.type, playerCount_)))
-        : QStringLiteral("已选 %1 张，尚非合法牌型").arg(selected.size()));
+    const bool sequence = pattern.isValid() &&
+        (pattern.type == CardPatternType::Straight ||
+         pattern.type == CardPatternType::ConsecutivePairs ||
+         pattern.type == CardPatternType::Airplane);
+    announce(sequence
+        ? QString::fromStdWString(CardTextFormatter::formatPlayedCards(pattern, selected))
+        : QString::fromStdWString(CardTextFormatter::formatRankSpeech(
+              handModel_->cardAt(row).rank())), AnnouncementCategory::CardSelection);
+}
+
+void OnlineWindow::takeCurrentGroup() {
+    if (!handModel_ || !handView_->currentIndex().isValid()) return;
+    int row = handModel_->groupStartRow(handView_->currentIndex().row());
+    if (row < 0) return;
+    handModel_->setAccessibilityTextSuppressed(true);
+    auto result = handModel_->selectGroup(row);
+    if (!result.valid) return;
+    if (result.newlySelectedCount == 0) {
+        const int next = handModel_->nextGroupStartRow(row);
+        if (next != row) { row = next; result = handModel_->selectGroup(row); }
+    }
+    const QModelIndex index = handModel_->index(row, 0);
+    {
+        const QSignalBlocker blocker(handView_->selectionModel());
+        handView_->selectionModel()->setCurrentIndex(index, QItemSelectionModel::NoUpdate);
+    }
+    handView_->scrollTo(index, QAbstractItemView::EnsureVisible);
+    handView_->viewport()->update();
+    if (result.newlySelectedCount == 0) return;
+    handModel_->completeEndpointSelection(playerCount_, false);
+    sound_.play(SoundId::CardSelect);
+    const auto selected = handModel_->selectedCards();
+    const CardPattern pattern = PatternAnalyzer::analyze(selected, playerCount_);
+    const bool sequence = pattern.isValid() &&
+        (pattern.type == CardPatternType::Straight ||
+         pattern.type == CardPatternType::ConsecutivePairs ||
+         pattern.type == CardPatternType::Airplane);
+    announce(sequence
+        ? QString::fromStdWString(CardTextFormatter::formatPlayedCards(pattern, selected))
+        : QString::fromStdWString(CardTextFormatter::formatSameRankSpeech(
+              result.rank, result.groupCount)), AnnouncementCategory::CardSelection);
+}
+
+void OnlineWindow::putDownCurrentCard() {
+    if (!handModel_) return;
+    handModel_->setAccessibilityTextSuppressed(true);
+    std::optional<Card> card;
+    const QModelIndex index = handView_->currentIndex();
+    if (index.isValid() && handModel_->isSelected(index.row())) {
+        card = handModel_->cardAt(index.row());
+        handModel_->setSelected(index.row(), false);
+    } else {
+        card = handModel_->deselectNextPickedCard();
+    }
+    if (!card) return;
+    sound_.play(SoundId::CardDeselect);
+    announce(QString::fromStdWString(CardTextFormatter::formatRankSpeech(card->rank())),
+             AnnouncementCategory::CardSelection);
+}
+
+void OnlineWindow::putDownAllCards() {
+    if (!handModel_ || handModel_->selectedCount() == 0) return;
+    const auto cards = handModel_->selectedCards();
+    handModel_->setAccessibilityTextSuppressed(true);
+    handModel_->clearSelection();
+    sound_.play(SoundId::CardDeselect);
+    const CardPattern pattern = PatternAnalyzer::analyze(cards, playerCount_);
+    const bool sequence = pattern.isValid() &&
+        (pattern.type == CardPatternType::Straight ||
+         pattern.type == CardPatternType::ConsecutivePairs ||
+         pattern.type == CardPatternType::Airplane);
+    announce(sequence
+        ? QString::fromStdWString(CardTextFormatter::formatPlayedCards(pattern, cards))
+        : QString::fromStdWString(CardTextFormatter::formatCards(cards)),
+        AnnouncementCategory::CardSelection);
+}
+
+void OnlineWindow::showHint() {
+    if (!isRoundActive() || roomView_.value(QStringLiteral("phase")).toInt() != 4
+        || roomView_.value(QStringLiteral("current_player")).toInt(-1) != selfSeat_)
+        return;
+    Hand hand;
+    std::vector<Card> ownCards;
+    for (int row = 0; row < handModel_->rowCount(); ++row)
+        ownCards.push_back(handModel_->cardAt(row));
+    hand.addCards(ownCards);
+    std::vector<Card> lastCards;
+    for (const QJsonValue& value : roomView_.value(QStringLiteral("last_played_cards")).toArray()) {
+        const int id = value.toInt(-1);
+        if (id >= 0 && id < TOTAL_CARDS) lastCards.push_back(Card::create(CardId(id)));
+    }
+    std::vector<Card> hint;
+    if (lastCards.empty()) {
+        auto moves = LegalMoveGenerator::generateFreePlayMoves(hand, playerCount_);
+        if (!moves.empty()) hint = std::move(moves.front());
+    } else {
+        const CardPattern lastPattern = PatternAnalyzer::analyze(lastCards, playerCount_);
+        auto moves = LegalMoveGenerator::generateResponseMoves(hand, lastPattern, playerCount_);
+        for (const auto& move : moves) {
+            const CardPattern pattern = PatternAnalyzer::analyze(move, playerCount_);
+            if (pattern.isValid() && PatternComparator::canBeat(pattern, lastPattern)) {
+                hint = move;
+                break;
+            }
+        }
+    }
+    if (hint.empty()) {
+        announce(QStringLiteral("当前没有可以压过上一手的牌，可以按Control加回车键过牌"));
+        sound_.play(SoundId::Invalid);
+        return;
+    }
+    handModel_->setAccessibilityTextSuppressed(true);
+    handModel_->clearSelection();
+    for (int row = 0; row < handModel_->rowCount(); ++row) {
+        if (std::any_of(hint.cbegin(), hint.cend(), [this, row](const Card& card) {
+                return card.id() == handModel_->cardAt(row).id();
+            })) handModel_->setSelected(row, true);
+    }
+    sound_.play(SoundId::CardSelect);
+    announce(QStringLiteral("提示牌，共%1张，按回车出牌").arg(hint.size()),
+             AnnouncementCategory::CardSelection);
 }
 
 QString OnlineWindow::visibleCardNames(const QJsonArray& ids) const {
-    QStringList names;
+    std::vector<Card> cards;
     for (const QJsonValue& value : ids) {
         const int id = value.toInt(-1);
         if (id >= 0 && id < TOTAL_CARDS)
-            names << QString::fromStdWString(CardTextFormatter::formatCard(Card::create(CardId(id))));
+            cards.push_back(Card::create(CardId(id)));
     }
-    return names.join(QStringLiteral("、"));
+    return QString::fromStdWString(CardTextFormatter::formatPublicCards(cards));
 }
 
 void OnlineWindow::startRound() { send(QStringLiteral("start"), {}, true); }
 void OnlineWindow::bid() {
-    if (!isRoundActive()) return;
-    send(QStringLiteral("bid"), {{QStringLiteral("score"), bidSpin_->value()}}, true);
+    if (!isRoundActive() || roomView_.value(QStringLiteral("phase")).toInt() != 2
+        || roomView_.value(QStringLiteral("current_player")).toInt(-1) != selfSeat_
+        || bidDialog_) return;
+    const QString turn = roundId_ + QLatin1Char(':')
+        + roomView_.value(QStringLiteral("deadline_ms")).toString();
+    int highest = 0;
+    for (const QJsonValue& seat : roomView_.value(QStringLiteral("seats")).toArray())
+        highest = std::max(highest, seat.toObject().value(QStringLiteral("bid")).toInt());
+    QDialog dialog(this);
+    bidDialog_ = &dialog;
+    dialog.setWindowTitle(QStringLiteral("叫分"));
+    auto* layout = new QVBoxLayout(&dialog);
+    layout->addWidget(new QLabel(QStringLiteral("轮到你叫分，当前最高 %1 分，请选择：")
+        .arg(highest), &dialog));
+    auto* choices = new QHBoxLayout;
+    for (int score = 0; score <= 3; ++score) {
+        auto* button = makeButton(score == 0 ? QStringLiteral("不叫")
+            : QStringLiteral("%1 分").arg(score), &dialog);
+        button->setEnabled(score == 0 || score > highest);
+        if (score == 0) button->setFocus();
+        choices->addWidget(button);
+        connect(button, &QPushButton::clicked, &dialog,
+                [&dialog, score]() { dialog.done(score + 1); });
+        auto* shortcut = new QShortcut(QKeySequence(Qt::Key_0 + score), &dialog);
+        shortcut->setContext(Qt::WidgetWithChildrenShortcut);
+        connect(shortcut, &QShortcut::activated, button, [button]() {
+            if (button->isEnabled()) button->click();
+        });
+    }
+    layout->addLayout(choices);
+    auto* cancel = makeButton(QStringLiteral("取消"), &dialog);
+    layout->addWidget(cancel);
+    connect(cancel, &QPushButton::clicked, &dialog, &QDialog::reject);
+    const int choice = dialog.exec();
+    bidDialog_ = nullptr;
+    if (choice >= 1 && choice <= 4 && isRoundActive()
+        && roomView_.value(QStringLiteral("phase")).toInt() == 2
+        && roomView_.value(QStringLiteral("current_player")).toInt(-1) == selfSeat_
+        && roundId_ + QLatin1Char(':')
+            + roomView_.value(QStringLiteral("deadline_ms")).toString() == turn)
+        send(QStringLiteral("bid"), {{QStringLiteral("score"), choice - 1}}, true);
 }
 void OnlineWindow::playSelected() {
-    if (!isRoundActive() || selectedCards_.isEmpty()) {
+    if (!isRoundActive() || roomView_.value(QStringLiteral("phase")).toInt() != 4
+        || roomView_.value(QStringLiteral("current_player")).toInt(-1) != selfSeat_) return;
+    const auto selected = handModel_->selectedCardIds();
+    if (selected.empty()) {
         announce(QStringLiteral("请先选择要出的牌"), AnnouncementCategory::Error); return;
     }
     QJsonArray ids;
-    for (int id : selectedCards_) ids.append(id);
+    for (CardId id : selected) ids.append(int(id));
     send(QStringLiteral("play"), {{QStringLiteral("card_ids"), ids}}, true);
 }
-void OnlineWindow::pass() { if (isRoundActive()) send(QStringLiteral("pass"), {}, true); }
+void OnlineWindow::pass() {
+    if (isRoundActive() && roomView_.value(QStringLiteral("phase")).toInt() == 4
+        && roomView_.value(QStringLiteral("current_player")).toInt(-1) == selfSeat_)
+        send(QStringLiteral("pass"), {}, true);
+}
 
 bool OnlineWindow::isRoundActive() const {
     return roomView_.value(QStringLiteral("status")).toString() == QStringLiteral("playing");
@@ -935,6 +1238,129 @@ QString OnlineWindow::errorText(const QString& code) const {
         ? QStringLiteral("未知错误") : code));
 }
 
+bool OnlineWindow::handleRoomKey(QKeyEvent* event) {
+    if (pages_->currentIndex() != 3 || QApplication::activeModalWidget()) return false;
+    const auto modifiers = event->modifiers() & ~Qt::KeypadModifier;
+    const int key = event->key();
+    const bool plain = modifiers == Qt::NoModifier;
+    const bool control = modifiers == Qt::ControlModifier;
+    const bool browsing = (key == Qt::Key_Left || key == Qt::Key_Right)
+        && (plain || control);
+    if (event->isAutoRepeat() && !browsing) return true;
+    if ((key == Qt::Key_Left || key == Qt::Key_Right)
+        && modifiers == Qt::ShiftModifier) return true;
+    if ((key == Qt::Key_Q && control) || (key == Qt::Key_X && modifiers == Qt::AltModifier)) {
+        close(); return true;
+    }
+    if (key == Qt::Key_Escape && plain) { leaveRoom(); return true; }
+    if (key == Qt::Key_H && modifiers == Qt::AltModifier) {
+        showHint(); return true;
+    }
+    if (key == Qt::Key_E && modifiers == Qt::AltModifier) {
+        playSelected(); return true;
+    }
+    if (key == Qt::Key_P && modifiers == Qt::AltModifier) {
+        pass(); return true;
+    }
+    if (key == Qt::Key_F11 && plain) {
+        if (isRoundActive()) {
+            const int actor = roomView_.value(QStringLiteral("current_player")).toInt(-1);
+            const QJsonArray seats = roomView_.value(QStringLiteral("seats")).toArray();
+            if (actor >= 0 && actor < seats.size())
+                announce(seats[actor].toObject().value(QStringLiteral("nickname")).toString(),
+                         AnnouncementCategory::Turn);
+        }
+        return true;
+    }
+    if (key == Qt::Key_F12 && plain) {
+        const QJsonArray ids = roomView_.value(QStringLiteral("last_played_cards")).toArray();
+        const QJsonArray seats = roomView_.value(QStringLiteral("seats")).toArray();
+        const int actor = roomView_.value(QStringLiteral("last_played_by")).toInt(-1);
+        if (ids.isEmpty() || actor < 0 || actor >= seats.size()) {
+            announce(QStringLiteral("空"));
+        } else {
+            std::vector<Card> cards;
+            for (const QJsonValue& value : ids) {
+                const int id = value.toInt(-1);
+                if (id >= 0 && id < TOTAL_CARDS)
+                    cards.push_back(Card::create(CardId(id)));
+            }
+            const CardPattern pattern = PatternAnalyzer::analyze(cards, playerCount_);
+            announce(seats[actor].toObject().value(QStringLiteral("nickname")).toString()
+                + QStringLiteral("，")
+                + QString::fromStdWString(CardTextFormatter::formatPlayedCards(
+                    pattern, cards, playerCount_)));
+        }
+        return true;
+    }
+    if (key == Qt::Key_F && modifiers == Qt::AltModifier) {
+        announce(QStringLiteral("基础分：%1，当前倍数：%2")
+            .arg(roomView_.value(QStringLiteral("base_score")).toInt())
+            .arg(roomView_.value(QStringLiteral("multiplier")).toString(QStringLiteral("1"))));
+        return true;
+    }
+    if (key >= Qt::Key_1 && key <= Qt::Key_4 && plain
+        && !event->modifiers().testFlag(Qt::KeypadModifier)) {
+        const int relative = key - Qt::Key_1;
+        const int count = roomView_.value(QStringLiteral("player_count")).toInt(playerCount_);
+        if (relative >= count) {
+            announce(QStringLiteral("当前%1人模式没有%2号玩家").arg(count).arg(relative + 1));
+            return true;
+        }
+        const QJsonArray seats = roomView_.value(QStringLiteral("seats")).toArray();
+        const int source = (std::max(0, selfSeat_) + relative) % count;
+        if (source < seats.size()) {
+            const QJsonObject seat = seats[source].toObject();
+            QString message = seat.value(QStringLiteral("nickname")).toString();
+            if (relative == 0) message += QStringLiteral("，自己");
+            message += QStringLiteral("，剩余%1张牌")
+                .arg(seat.value(QStringLiteral("remaining")).toInt());
+            const int role = seat.value(QStringLiteral("role")).toInt();
+            message += role == int(Role::Landlord) ? QStringLiteral("，地主")
+                : role == int(Role::Farmer) ? QStringLiteral("，农民")
+                : QStringLiteral("，身份未定");
+            announce(message);
+        }
+        return true;
+    }
+    if (handModel_ && handModel_->rowCount() > 0) {
+        const int row = handView_->currentIndex().isValid()
+            ? handView_->currentIndex().row() : 0;
+        if (browsing) {
+            int target = -1;
+            if (key == Qt::Key_Left)
+                target = plain ? handModel_->previousBrowsableGroupStartRow(row)
+                               : handModel_->previousBrowsableMultiCardGroupStartRow(row);
+            else
+                target = plain ? handModel_->nextBrowsableGroupStartRow(row)
+                               : handModel_->nextBrowsableMultiCardGroupStartRow(row);
+            if (target >= 0) moveHandCursorTo(target);
+            return true;
+        }
+        if (key == Qt::Key_Home && plain) {
+            moveHandCursorTo(handModel_->firstUnselectedRow()); return true;
+        }
+        if (key == Qt::Key_End && plain) {
+            moveHandCursorTo(handModel_->lastBrowsableGroupStartRow()); return true;
+        }
+        if (isRoundActive() && roomView_.value(QStringLiteral("phase")).toInt() == 4) {
+            if (key == Qt::Key_Up && plain) { takeCurrentCard(); return true; }
+            if (key == Qt::Key_Up && control) { takeCurrentGroup(); return true; }
+            if (key == Qt::Key_Down && plain) { putDownCurrentCard(); return true; }
+            if (key == Qt::Key_Down && control) { putDownAllCards(); return true; }
+        }
+    }
+    const bool myPlayTurn = isRoundActive()
+        && roomView_.value(QStringLiteral("phase")).toInt() == 4
+        && roomView_.value(QStringLiteral("current_player")).toInt(-1) == selfSeat_;
+    if (myPlayTurn && key == Qt::Key_Space && plain) return true;
+    if (myPlayTurn && (key == Qt::Key_Return || key == Qt::Key_Enter)) {
+        if (plain) { playSelected(); return true; }
+        if (control) { pass(); return true; }
+    }
+    return false;
+}
+
 bool OnlineWindow::eventFilter(QObject* watched, QEvent* event) {
     if (event->type() == QEvent::KeyPress) {
         auto* key = static_cast<QKeyEvent*>(event);
@@ -945,21 +1371,9 @@ bool OnlineWindow::eventFilter(QObject* watched, QEvent* event) {
                 joinSelectedRoom(); return true;
             }
         }
-        if (watched == handList_) {
-            if (key->key() == Qt::Key_Space) {
-                if (auto* item = handList_->currentItem()) {
-                    const int id = item->data(Qt::UserRole).toInt();
-                    if (selectedCards_.contains(id)) selectedCards_.remove(id);
-                    else selectedCards_.insert(id);
-                    refreshHand(roomView_.value(QStringLiteral("hand")).toArray());
-                    announce(previewLabel_->text(), AnnouncementCategory::CardSelection);
-                }
-                return true;
-            }
-            if (key->key() == Qt::Key_Return || key->key() == Qt::Key_Enter) {
-                playSelected(); return true;
-            }
-        }
+        auto* widget = qobject_cast<QWidget*>(watched);
+        if (pages_->currentIndex() == 3 && widget && widget->window() == this &&
+            handleRoomKey(key)) return true;
     }
     return QWidget::eventFilter(watched, event);
 }
@@ -979,6 +1393,7 @@ void OnlineWindow::keyPressEvent(QKeyEvent* event) {
         case Qt::Key_F5: showSettingsDialog(); return;
         default: break;
         }
+        if (handleRoomKey(event)) return;
     }
     QWidget::keyPressEvent(event);
 }

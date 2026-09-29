@@ -1,5 +1,6 @@
 #include "ai_service.h"
 #include "../../src/app/ai_battle_prompt.h"
+#include "../../src/compat/qt_json_int64.h"
 
 #include <QCoreApplication>
 #include <QJsonArray>
@@ -540,8 +541,8 @@ QString AiService::extractDecisionText(const QJsonObject& response, int protocol
                                        bool* reasoningOnly) {
     const QJsonObject usage = response.value("usage").toObject();
     if (protocol == 2) {
-        if (inputTokens) *inputTokens = usage.value("prompt_tokens").toInteger(-1);
-        if (outputTokens) *outputTokens = usage.value("completion_tokens").toInteger(-1);
+        if (inputTokens) *inputTokens = compat::jsonToInt64(usage.value("prompt_tokens"), -1);
+        if (outputTokens) *outputTokens = compat::jsonToInt64(usage.value("completion_tokens"), -1);
         const QJsonArray choices = response.value("choices").toArray();
         if (choices.isEmpty()) return {};
         const QJsonObject message = choices.at(0).toObject()
@@ -553,8 +554,8 @@ QString AiService::extractDecisionText(const QJsonObject& response, int protocol
         }
         return content;
     }
-    if (inputTokens) *inputTokens = usage.value("input_tokens").toInteger(-1);
-    if (outputTokens) *outputTokens = usage.value("output_tokens").toInteger(-1);
+    if (inputTokens) *inputTokens = compat::jsonToInt64(usage.value("input_tokens"), -1);
+    if (outputTokens) *outputTokens = compat::jsonToInt64(usage.value("output_tokens"), -1);
     if (response.value("output_text").isString()) return response.value("output_text").toString();
     for (const auto& output : response.value("output").toArray()) {
         for (const auto& content : output.toObject().value("content").toArray()) {

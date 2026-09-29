@@ -80,6 +80,7 @@ bool AccessibilityService::announce(const Announcement& announcement, QObject* t
             QAccessible::setActive(true);
         }
         if (delivery == ScreenReaderDelivery::StandardAnnouncement) {
+#if QT_VERSION >= QT_VERSION_CHECK(6, 8, 0)
             QAccessibleAnnouncementEvent event(
                 widget, QString::fromStdWString(scheduled->text));
             if (scheduled->priority == AnnouncementPriority::Critical ||
@@ -87,6 +88,10 @@ bool AccessibilityService::announce(const Announcement& announcement, QObject* t
                 event.setPoliteness(QAccessible::AnnouncementPoliteness::Assertive);
             }
             QAccessible::updateAccessibility(&event);
+#else
+            QAccessibleEvent event(widget, QAccessible::Focus);
+            QAccessible::updateAccessibility(&event);
+#endif
         } else {
             QAccessibleEvent event(widget, QAccessible::Focus);
             QAccessible::updateAccessibility(&event);

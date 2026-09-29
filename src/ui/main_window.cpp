@@ -83,6 +83,35 @@ namespace fpdz {
 
 namespace {
 
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
+class Utf8ReportStream {
+public:
+    explicit Utf8ReportStream(QString* report) : stream_(report) {}
+
+    template <std::size_t N>
+    Utf8ReportStream& operator<<(const char (&value)[N]) {
+        stream_ << QString::fromUtf8(value);
+        return *this;
+    }
+
+    Utf8ReportStream& operator<<(const char* value) {
+        stream_ << QString::fromUtf8(value);
+        return *this;
+    }
+
+    template <typename T>
+    Utf8ReportStream& operator<<(const T& value) {
+        stream_ << value;
+        return *this;
+    }
+
+    void flush() { stream_.flush(); }
+
+private:
+    QTextStream stream_;
+};
+#endif
+
 constexpr int kFirstRunGuideRevision = 2;
 const auto kStartupUpdateGuideFileName = u8"飞船斗地主更新说明.txt";
 const auto kDetailedGuideFileName = u8"飞船斗地主详细使用说明.txt";
@@ -1714,17 +1743,17 @@ void MainWindow::keyPressEvent(QKeyEvent* event) {
     QMainWindow::keyPressEvent(event);
 }
 
-bool MainWindow::nativeEvent(const QByteArray& eventType, void* message, qintptr* result) {
+bool MainWindow::nativeEvent(const QByteArray& eventType, void* message, NativeEventResult* result) {
     if (handleWindowsMessage(message, result)) return true;
     return QMainWindow::nativeEvent(eventType, message, result);
 }
 
-bool MainWindow::nativeEventFilter(const QByteArray& eventType, void* message, qintptr* result) {
+bool MainWindow::nativeEventFilter(const QByteArray& eventType, void* message, NativeEventResult* result) {
     Q_UNUSED(eventType);
     return handleWindowsMessage(message, result);
 }
 
-bool MainWindow::handleWindowsMessage(void* message, qintptr* result) {
+bool MainWindow::handleWindowsMessage(void* message, NativeEventResult* result) {
 #ifdef Q_OS_WIN
     auto* msg = static_cast<MSG*>(message);
     if (msg && msg->message == kKeyboardTraceMessage) {
@@ -1893,8 +1922,8 @@ bool MainWindow::handleNativeShortcut(
     if (shouldYieldKeyboardHandlingToFocusedWidget()) return false;
 
     if (virtualKey == VK_F5 && noModifier) {
-        openSettingsDialog();
-        return true;
+        return triggerShortcutAction(ShortcutAction::OpenSettings,
+                                     QStringLiteral("native_key_message"));
     }
     if (virtualKey == VK_F11 && noModifier) {
         announceCurrentTurn();
@@ -2321,8 +2350,8 @@ bool MainWindow::handleKeyPress(QKeyEvent* event) {
         return true;
     }
     if (event->key() == Qt::Key_F5 && navigationModifiers == Qt::NoModifier) {
-        openSettingsDialog();
-        return true;
+        return triggerShortcutAction(ShortcutAction::OpenSettings,
+                                     QStringLiteral("qt_event"));
     }
     if (event->key() == Qt::Key_F2 && navigationModifiers == Qt::NoModifier) {
         return triggerBottomCardsShortcut(QStringLiteral("qt_event"));
@@ -3415,7 +3444,11 @@ void MainWindow::resumeHandAccessibilityForUserAction() {
 
 QString MainWindow::buildDiagnosticReport() const {
     QString report;
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
+    Utf8ReportStream out(&report);
+#else
     QTextStream out(&report);
+#endif
     const QString appDir = QCoreApplication::applicationDirPath();
     const QString exePath = QCoreApplication::applicationFilePath();
     const auto snapshot = m_engine.state().publicSnapshot();
@@ -3443,8 +3476,10 @@ QString MainWindow::buildDiagnosticReport() const {
 
     out << "\n[关键组件]\n";
     const QStringList components = {
-        QString::fromUtf8(u8"飞船斗地主.exe"), QStringLiteral("Qt6Core.dll"),
-        QStringLiteral("Qt6Gui.dll"), QStringLiteral("Qt6Widgets.dll"),
+        QFileInfo(exePath).fileName(),
+        QStringLiteral("Qt%1Core.dll").arg(QT_VERSION_MAJOR),
+        QStringLiteral("Qt%1Gui.dll").arg(QT_VERSION_MAJOR),
+        QStringLiteral("Qt%1Widgets.dll").arg(QT_VERSION_MAJOR),
         QStringLiteral("platforms/qwindows.dll")
     };
     for (const QString& relative : components) {
@@ -3516,6 +3551,7 @@ QString MainWindow::buildDiagnosticReport() const {
     } else {
         out << "诊断服务未启用\n";
     }
+    out.flush();
     if (report.size() > 1024 * 1024) report.truncate(1024 * 1024);
     return report;
 }

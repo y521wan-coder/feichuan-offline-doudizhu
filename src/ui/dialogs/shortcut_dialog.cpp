@@ -136,7 +136,7 @@ private:
         item->setCheckState(Qt::Unchecked);
         item->setData(kChoiceKindRole, static_cast<int>(ChoiceKind::BaseKey));
         item->setData(kChoiceKeyRole, key);
-        item->setData(kChoiceModifiersRole, inherentModifiers.toInt());
+        item->setData(kChoiceModifiersRole, static_cast<int>(inherentModifiers));
         item->setToolTip(QString::fromUtf8(u8"%1，按空格键选中或取消").arg(name));
     }
 
@@ -153,7 +153,7 @@ private:
             bool selected = false;
             if (kind == ChoiceKind::Modifier) {
                 selected = binding.modifiers.testFlag(
-                    static_cast<Qt::KeyboardModifier>(choiceModifiers.toInt()));
+                    static_cast<Qt::KeyboardModifier>(static_cast<int>(choiceModifiers)));
             } else {
                 selected = item->data(kChoiceKeyRole).toInt() == binding.key &&
                     binding.modifiers.testFlag(Qt::KeypadModifier) ==

@@ -24,6 +24,7 @@ DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
+MinVersion=6.1sp1
 PrivilegesRequired=admin
 OutputDir={#OutputDir}
 OutputBaseFilename={#AppName}-Setup-{#AppVersion}
@@ -45,8 +46,9 @@ InfoBeforeFile={#SourceDir}\docs\飞船斗地主免费版与隐私说明.txt
 Name: "chinesesimp"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
 
 [Files]
-Source: "{#SourceDir}\*"; DestDir: "{app}"; Excludes: "vc_redist.x64.exe"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#SourceDir}\*"; DestDir: "{app}"; Excludes: "vc_redist.x64.exe,vc_redist_legacy.x64.exe"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#SourceDir}\vc_redist.x64.exe"; DestDir: "{tmp}"; Flags: deleteafterinstall
+Source: "{#SourceDir}\vc_redist_legacy.x64.exe"; DestDir: "{tmp}"; Flags: deleteafterinstall
 
 [InstallDelete]
 Type: files; Name: "{userdesktop}\四人斗地主.lnk"
@@ -68,5 +70,6 @@ Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExeName}"; WorkingDir: 
 Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"
 
 [Run]
-Filename: "{tmp}\vc_redist.x64.exe"; Parameters: "/install /quiet /norestart"; StatusMsg: "正在安装 Microsoft Visual C++ 运行库……"; Flags: waituntilterminated runhidden
+Filename: "{tmp}\vc_redist.x64.exe"; Parameters: "/install /quiet /norestart"; StatusMsg: "正在安装 Microsoft Visual C++ 运行库……"; Flags: waituntilterminated runhidden; MinVersion: 10.0
+Filename: "{tmp}\vc_redist_legacy.x64.exe"; Parameters: "/install /quiet /norestart"; StatusMsg: "正在安装 Microsoft Visual C++ 运行库……"; Flags: waituntilterminated runhidden; OnlyBelowVersion: 10.0
 Filename: "{app}\{#AppExeName}"; Description: "启动 {#AppName}"; Flags: nowait postinstall skipifsilent

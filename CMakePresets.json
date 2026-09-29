@@ -30,6 +30,16 @@
             }
         },
         {
+            "name": "win7-x64",
+            "displayName": "Windows 7 compatible Release x64",
+            "inherits": "base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "CMAKE_PREFIX_PATH": "${sourceDir}/Qt/win7-compat/5.15.2/msvc2019_64",
+                "FPDZ_WINDOWS7_COMPAT": "ON"
+            }
+        },
+        {
             "name": "relwithdebinfo-x64",
             "displayName": "RelWithDebInfo x64",
             "inherits": "base",
@@ -41,10 +51,12 @@
     "buildPresets": [
         { "name": "debug-x64", "configurePreset": "debug-x64" },
         { "name": "release-x64", "configurePreset": "release-x64" },
+        { "name": "win7-x64", "configurePreset": "win7-x64" },
         { "name": "relwithdebinfo-x64", "configurePreset": "relwithdebinfo-x64" }
     ],
     "testPresets": [
         { "name": "debug-x64", "configurePreset": "debug-x64", "output": {"outputOnFailure": true} },
-        { "name": "release-x64", "configurePreset": "release-x64", "output": {"outputOnFailure": true} }
+        { "name": "release-x64", "configurePreset": "release-x64", "output": {"outputOnFailure": true} },
+        { "name": "win7-x64", "configurePreset": "win7-x64", "output": {"outputOnFailure": true} }
     ]
 }

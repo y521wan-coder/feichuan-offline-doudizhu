@@ -5,6 +5,7 @@
 #include "strategic_search_evaluator.h"
 #include "ai_level_profile.h"
 #include "../core/rules/pattern_analyzer.h"
+#include "../compat/qt_json_int64.h"
 
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -119,8 +120,8 @@ QJsonObject AiDecisionRequest::toServiceJson() const {
     return {{QStringLiteral("protocol_version"), AI_SERVICE_PROTOCOL_VERSION},
             {QStringLiteral("type"), QStringLiteral("decision")},
             {QStringLiteral("request_id"), requestId},
-            {QStringLiteral("game_id"), static_cast<qint64>(gameId)},
-            {QStringLiteral("event_sequence"), static_cast<qint64>(eventSequence)},
+            {QStringLiteral("game_id"), compat::jsonInt64(static_cast<qint64>(gameId))},
+            {QStringLiteral("event_sequence"), compat::jsonInt64(static_cast<qint64>(eventSequence))},
             {QStringLiteral("phase"), phaseName(phase)},
             {QStringLiteral("seat"), static_cast<int>(playerId)},
             {QStringLiteral("credential_id"), controller.credentialId},
@@ -134,8 +135,8 @@ QJsonObject AiDecisionRequest::toServiceJson() const {
 AiDecisionResponse AiDecisionResponse::fromServiceJson(const QJsonObject& json) {
     AiDecisionResponse value;
     value.requestId = json.value("request_id").toString();
-    value.gameId = static_cast<uint64_t>(json.value("game_id").toInteger());
-    value.eventSequence = static_cast<uint64_t>(json.value("event_sequence").toInteger());
+    value.gameId = static_cast<uint64_t>(compat::jsonToInt64(json.value("game_id")));
+    value.eventSequence = static_cast<uint64_t>(compat::jsonToInt64(json.value("event_sequence")));
     const QString phase = json.value("phase").toString();
     value.phase = phase == QStringLiteral("bidding") ? GamePhase::Bidding :
                   phase == QStringLiteral("playing") ? GamePhase::Playing :
@@ -148,8 +149,8 @@ AiDecisionResponse AiDecisionResponse::fromServiceJson(const QJsonObject& json) 
     value.errorCode = json.value("error_code").toString();
     value.safeMessage = json.value("message").toString();
     value.latencyMilliseconds = json.value("latency_ms").toInt();
-    value.inputTokens = json.value("input_tokens").toInteger(-1);
-    value.outputTokens = json.value("output_tokens").toInteger(-1);
+    value.inputTokens = compat::jsonToInt64(json.value("input_tokens"), -1);
+    value.outputTokens = compat::jsonToInt64(json.value("output_tokens"), -1);
     return value;
 }
 

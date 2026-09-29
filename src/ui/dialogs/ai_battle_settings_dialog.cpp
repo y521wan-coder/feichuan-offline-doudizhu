@@ -93,7 +93,7 @@ AiBattleSettingsDialog::AiBattleSettingsDialog(const AiBattleSettings& settings,
     cloudForm->addRow(QString::fromUtf8(u8"云认证"), m_cloud.credential);
     cloudForm->addRow(QString::fromUtf8(u8"模型"), m_cloud.model);
     cloudForm->addRow(QString::fromUtf8(u8"最大等待（秒）"), m_cloud.timeout);
-    connect(m_cloud.credential, &QComboBox::currentIndexChanged, this,
+    connect(m_cloud.credential, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
             [this]() { updateCloudControls(); });
     root->addWidget(m_cloud.group);
 

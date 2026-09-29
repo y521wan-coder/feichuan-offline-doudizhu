@@ -49,7 +49,7 @@ add_library(fpdz_core STATIC
     src/core/text/game_text_formatter.cpp
 )
 target_include_directories(fpdz_core PUBLIC "${CMAKE_SOURCE_DIR}/src")
-target_link_libraries(fpdz_core PRIVATE Qt6::Core)
+target_link_libraries(fpdz_core PRIVATE Qt${FPDZ_QT_MAJOR}::Core)
 if(WIN32)
     target_link_libraries(fpdz_core PRIVATE bcrypt.lib)
 endif()
@@ -73,7 +73,7 @@ add_library(fpdz_ai STATIC
     src/ai/hint_service.cpp
 )
 target_include_directories(fpdz_ai PUBLIC "${CMAKE_SOURCE_DIR}/src")
-target_link_libraries(fpdz_ai PUBLIC fpdz_core PRIVATE Qt6::Core)
+target_link_libraries(fpdz_ai PUBLIC fpdz_core PRIVATE Qt${FPDZ_QT_MAJOR}::Core)
 set_target_properties(fpdz_ai PROPERTIES AUTOMOC ON)
 fpdz_apply_warnings(fpdz_ai)
 
@@ -90,7 +90,7 @@ add_library(fpdz_persistence STATIC
 )
 set_target_properties(fpdz_persistence PROPERTIES AUTOMOC ON)
 target_include_directories(fpdz_persistence PUBLIC "${CMAKE_SOURCE_DIR}/src")
-target_link_libraries(fpdz_persistence PUBLIC fpdz_core PRIVATE Qt6::Core)
+target_link_libraries(fpdz_persistence PUBLIC fpdz_core PRIVATE Qt${FPDZ_QT_MAJOR}::Core)
 fpdz_apply_warnings(fpdz_persistence)
 
 # Accessibility library
@@ -101,7 +101,7 @@ add_library(fpdz_accessibility STATIC
     src/accessibility/screen_reader_bridge.cpp
 )
 target_include_directories(fpdz_accessibility PUBLIC "${CMAKE_SOURCE_DIR}/src")
-target_link_libraries(fpdz_accessibility PUBLIC fpdz_core PRIVATE Qt6::Core Qt6::Widgets)
+target_link_libraries(fpdz_accessibility PUBLIC fpdz_core PRIVATE Qt${FPDZ_QT_MAJOR}::Core Qt${FPDZ_QT_MAJOR}::Widgets)
 fpdz_apply_warnings(fpdz_accessibility)
 
 # Application library
@@ -115,7 +115,7 @@ add_library(fpdz_app STATIC
 target_include_directories(fpdz_app PUBLIC "${CMAKE_SOURCE_DIR}/src")
 target_link_libraries(fpdz_app PUBLIC
     fpdz_core fpdz_ai fpdz_persistence fpdz_accessibility
-    PRIVATE Qt6::Core Qt6::Widgets
+    PRIVATE Qt${FPDZ_QT_MAJOR}::Core Qt${FPDZ_QT_MAJOR}::Widgets
 )
 target_compile_definitions(fpdz_app PRIVATE FPDZ_APP_VERSION="${FPDZ_VERSION}")
 fpdz_apply_warnings(fpdz_app)
@@ -146,7 +146,7 @@ add_library(fpdz_ui STATIC
 target_include_directories(fpdz_ui PUBLIC "${CMAKE_SOURCE_DIR}/src")
 target_link_libraries(fpdz_ui PUBLIC
     fpdz_core fpdz_ai fpdz_accessibility fpdz_app
-    PRIVATE Qt6::Core Qt6::Widgets winmm.lib
+    PRIVATE Qt${FPDZ_QT_MAJOR}::Core Qt${FPDZ_QT_MAJOR}::Widgets winmm.lib
 )
 set_target_properties(fpdz_ui PROPERTIES AUTOMOC ON AUTORCC ON)
 fpdz_apply_warnings(fpdz_ui)
@@ -172,7 +172,7 @@ if(WIN32)
 endif()
 target_link_libraries(FeichuanOfflineDoudizhu PRIVATE
     fpdz_app fpdz_ui fpdz_core fpdz_ai fpdz_persistence fpdz_accessibility
-    Qt6::Core Qt6::Widgets winmm.lib
+    Qt${FPDZ_QT_MAJOR}::Core Qt${FPDZ_QT_MAJOR}::Widgets winmm.lib
 )
 set_target_properties(FeichuanOfflineDoudizhu PROPERTIES
     OUTPUT_NAME "飞船斗地主"
@@ -182,15 +182,22 @@ set_target_properties(FeichuanOfflineDoudizhu PROPERTIES
 )
 fpdz_apply_warnings(FeichuanOfflineDoudizhu)
 
+if(WIN32 AND FPDZ_WINDOWS7_COMPAT)
+    add_executable(fpdz_windows_launcher WIN32 src/launcher/windows_launcher.cpp)
+    set_target_properties(fpdz_windows_launcher PROPERTIES
+        OUTPUT_NAME "飞船斗地主启动器")
+    fpdz_apply_warnings(fpdz_windows_launcher)
+endif()
+
 # Deploy Qt DLLs alongside the executable after build
-get_filename_component(_qt6_root "${Qt6_DIR}/../../.." ABSOLUTE)
+get_filename_component(_qt6_root "${${FPDZ_QT_PACKAGE}_DIR}/../../.." ABSOLUTE)
 set(_qt6_bin "${_qt6_root}/bin")
 set(_qt6_plugins "${_qt6_root}/plugins")
 add_custom_command(TARGET FeichuanOfflineDoudizhu POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "${_qt6_bin}/Qt6Core$<$<CONFIG:Debug>:d>.dll"
-        "${_qt6_bin}/Qt6Gui$<$<CONFIG:Debug>:d>.dll"
-        "${_qt6_bin}/Qt6Widgets$<$<CONFIG:Debug>:d>.dll"
+        "${_qt6_bin}/Qt${FPDZ_QT_MAJOR}Core$<$<CONFIG:Debug>:d>.dll"
+        "${_qt6_bin}/Qt${FPDZ_QT_MAJOR}Gui$<$<CONFIG:Debug>:d>.dll"
+        "${_qt6_bin}/Qt${FPDZ_QT_MAJOR}Widgets$<$<CONFIG:Debug>:d>.dll"
         "$<TARGET_FILE_DIR:FeichuanOfflineDoudizhu>"
     COMMAND ${CMAKE_COMMAND} -E make_directory
         "$<TARGET_FILE_DIR:FeichuanOfflineDoudizhu>/platforms"
@@ -211,8 +218,8 @@ add_custom_command(TARGET FeichuanOfflineDoudizhu POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E rm -f
         "$<TARGET_FILE_DIR:FeichuanOfflineDoudizhu>/nvdaControllerClient64.dll"
     COMMAND ${CMAKE_COMMAND} -E rm -f
-        "$<TARGET_FILE_DIR:FeichuanOfflineDoudizhu>/Qt6Sql.dll"
-        "$<TARGET_FILE_DIR:FeichuanOfflineDoudizhu>/Qt6Concurrent.dll"
+        "$<TARGET_FILE_DIR:FeichuanOfflineDoudizhu>/Qt${FPDZ_QT_MAJOR}Sql.dll"
+        "$<TARGET_FILE_DIR:FeichuanOfflineDoudizhu>/Qt${FPDZ_QT_MAJOR}Concurrent.dll"
     COMMAND ${CMAKE_COMMAND} -E remove_directory
         "$<TARGET_FILE_DIR:FeichuanOfflineDoudizhu>/sqldrivers"
     COMMENT "Deploying Qt DLLs for FeichuanOfflineDoudizhu"
@@ -240,7 +247,7 @@ target_include_directories(FeichuanOfflineDoudizhuUpdater PRIVATE
     "${CMAKE_SOURCE_DIR}/apps/updater"
 )
 target_link_libraries(FeichuanOfflineDoudizhuUpdater PRIVATE
-    Qt6::Core Qt6::Widgets Qt6::Network crypt32 bcrypt
+    Qt${FPDZ_QT_MAJOR}::Core Qt${FPDZ_QT_MAJOR}::Widgets Qt${FPDZ_QT_MAJOR}::Network crypt32 bcrypt
 )
 target_compile_definitions(FeichuanOfflineDoudizhuUpdater PRIVATE
     FPDZ_APP_VERSION="${FPDZ_VERSION}"
@@ -253,17 +260,20 @@ set_target_properties(FeichuanOfflineDoudizhuUpdater PROPERTIES
 fpdz_apply_warnings(FeichuanOfflineDoudizhuUpdater)
 add_custom_command(TARGET FeichuanOfflineDoudizhuUpdater POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "${_qt6_bin}/Qt6Core$<$<CONFIG:Debug>:d>.dll"
-        "${_qt6_bin}/Qt6Gui$<$<CONFIG:Debug>:d>.dll"
-        "${_qt6_bin}/Qt6Widgets$<$<CONFIG:Debug>:d>.dll"
-        "${_qt6_bin}/Qt6Network$<$<CONFIG:Debug>:d>.dll"
+        "${_qt6_bin}/Qt${FPDZ_QT_MAJOR}Core$<$<CONFIG:Debug>:d>.dll"
+        "${_qt6_bin}/Qt${FPDZ_QT_MAJOR}Gui$<$<CONFIG:Debug>:d>.dll"
+        "${_qt6_bin}/Qt${FPDZ_QT_MAJOR}Widgets$<$<CONFIG:Debug>:d>.dll"
+        "${_qt6_bin}/Qt${FPDZ_QT_MAJOR}Network$<$<CONFIG:Debug>:d>.dll"
         "$<TARGET_FILE_DIR:FeichuanOfflineDoudizhuUpdater>"
-    COMMAND ${CMAKE_COMMAND} -E make_directory
-        "$<TARGET_FILE_DIR:FeichuanOfflineDoudizhuUpdater>/tls"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "${_qt6_plugins}/tls/qschannelbackend$<$<CONFIG:Debug>:d>.dll"
-        "$<TARGET_FILE_DIR:FeichuanOfflineDoudizhuUpdater>/tls"
 )
+if(NOT FPDZ_WINDOWS7_COMPAT)
+    add_custom_command(TARGET FeichuanOfflineDoudizhuUpdater POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory
+            "$<TARGET_FILE_DIR:FeichuanOfflineDoudizhuUpdater>/tls"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${_qt6_plugins}/tls/qschannelbackend$<$<CONFIG:Debug>:d>.dll"
+            "$<TARGET_FILE_DIR:FeichuanOfflineDoudizhuUpdater>/tls")
+endif()
 
 # Independent cloud-AI service. Like the updater, this process is isolated from
 # the game executable and is allowed to link Qt Network.
@@ -278,7 +288,7 @@ target_include_directories(FeichuanDoudizhuAiService PRIVATE
     "${CMAKE_SOURCE_DIR}/apps/ai_service"
 )
 target_link_libraries(FeichuanDoudizhuAiService PRIVATE
-    Qt6::Core Qt6::Network crypt32
+    Qt${FPDZ_QT_MAJOR}::Core Qt${FPDZ_QT_MAJOR}::Network crypt32
 )
 set_target_properties(FeichuanDoudizhuAiService PROPERTIES
     OUTPUT_NAME "飞船斗地主AI服务"
@@ -288,15 +298,18 @@ set_target_properties(FeichuanDoudizhuAiService PROPERTIES
 fpdz_apply_warnings(FeichuanDoudizhuAiService)
 add_custom_command(TARGET FeichuanDoudizhuAiService POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "${_qt6_bin}/Qt6Core$<$<CONFIG:Debug>:d>.dll"
-        "${_qt6_bin}/Qt6Network$<$<CONFIG:Debug>:d>.dll"
+        "${_qt6_bin}/Qt${FPDZ_QT_MAJOR}Core$<$<CONFIG:Debug>:d>.dll"
+        "${_qt6_bin}/Qt${FPDZ_QT_MAJOR}Network$<$<CONFIG:Debug>:d>.dll"
         "$<TARGET_FILE_DIR:FeichuanDoudizhuAiService>"
-    COMMAND ${CMAKE_COMMAND} -E make_directory
-        "$<TARGET_FILE_DIR:FeichuanDoudizhuAiService>/tls"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "${_qt6_plugins}/tls/qschannelbackend$<$<CONFIG:Debug>:d>.dll"
-        "$<TARGET_FILE_DIR:FeichuanDoudizhuAiService>/tls"
 )
+if(NOT FPDZ_WINDOWS7_COMPAT)
+    add_custom_command(TARGET FeichuanDoudizhuAiService POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory
+            "$<TARGET_FILE_DIR:FeichuanDoudizhuAiService>/tls"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${_qt6_plugins}/tls/qschannelbackend$<$<CONFIG:Debug>:d>.dll"
+            "$<TARGET_FILE_DIR:FeichuanDoudizhuAiService>/tls")
+endif()
 # Testing
 enable_testing()
 add_subdirectory(tests)

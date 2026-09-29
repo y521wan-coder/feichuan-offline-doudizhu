@@ -216,7 +216,7 @@ bool CredentialManagerDialog::editRecord(QJsonObject record, bool isNew) {
     connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
     connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
     form->addRow(buttons);
-    connect(protocol, &QComboBox::currentIndexChanged, &dialog, [=](int) {
+    connect(protocol, QOverload<int>::of(&QComboBox::currentIndexChanged), &dialog, [=](int) {
         const bool official = protocol->currentData().toInt() == 0;
         requestUrl->setEnabled(!official);
         modelsUrl->setEnabled(!official);

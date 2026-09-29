@@ -119,7 +119,11 @@ def main():
         "platform": PLATFORM,
         "channel": CHANNEL,
         "version": version,
-        "release_notes": f"{PRODUCT_NAME} {version} Windows x64 版本",
+        "release_notes": (
+            "飞船斗地主 2.5：支持 Windows 7 SP1 至 Windows 11 64 位；"
+            "真人联机的叫分、选牌和出牌操作与单机版一致。"
+            if version == "2.5" else f"{PRODUCT_NAME} {version} Windows x64 版本"
+        ),
         "package_filename": expected_name,
         "file_size": file_size,
         "sha256": sha256,

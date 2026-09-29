@@ -2,6 +2,7 @@
 #include "../core/rules/pattern_analyzer.h"
 #include "../core/text/card_text_formatter.h"
 #include "../app/ai_battle_prompt.h"
+#include "../compat/qt_json_int64.h"
 
 #include <QDateTime>
 #include <QFile>
@@ -127,13 +128,13 @@ void AiBattleStatisticsRepository::recordRequest(
     qint64 outputTokens) {
     m_data[QStringLiteral("schemaVersion")] = 1;
     m_data[QStringLiteral("requestCount")] =
-        m_data.value("requestCount").toInteger() + 1;
+        compat::jsonToInt64(m_data.value("requestCount")) + 1;
     if (!success) {
         m_data[QStringLiteral("failureCount")] =
-            m_data.value("failureCount").toInteger() + 1;
+            compat::jsonToInt64(m_data.value("failureCount")) + 1;
         QJsonObject failures = m_data.value("failureTypes").toObject();
         const QString safeCode = errorCode.isEmpty() ? QStringLiteral("unknown") : errorCode;
-        failures[safeCode] = failures.value(safeCode).toInteger() + 1;
+        failures[safeCode] = compat::jsonToInt64(failures.value(safeCode)) + 1;
         m_data[QStringLiteral("failureTypes")] = failures;
     }
     QJsonObject entry{{QStringLiteral("time"), QDateTime::currentDateTimeUtc().toString(Qt::ISODate)},
@@ -284,7 +285,8 @@ void AiBattleStatisticsRepository::recordRound(const RoundResult& result,
                       {QStringLiteral("finalMultiplier"), result.finalMultiplier},
                       {QStringLiteral("seats"), seats}};
     appendBounded(m_data, QStringLiteral("rounds"), round);
-    m_data[QStringLiteral("gamesPlayed")] = m_data.value("gamesPlayed").toInteger() + 1;
+    m_data[QStringLiteral("gamesPlayed")] =
+        compat::jsonToInt64(m_data.value("gamesPlayed")) + 1;
 }
 
 bool AiBattleStatisticsRepository::recordRoundFinished(

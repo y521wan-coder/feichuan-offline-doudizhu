@@ -104,9 +104,9 @@ SoundManagerDialog::SoundManagerDialog(AppSettings& settings,
         m_soundService.stopMusic();
         emit backgroundMusicRestoreRequested();
     });
-    connect(m_categoryCombo, &QComboBox::currentIndexChanged,
+    connect(m_categoryCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, [this]() { populateEntries(); });
-    connect(m_entryCombo, &QComboBox::currentIndexChanged,
+    connect(m_entryCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, [this]() { refreshEntryStatus(); });
     connect(m_categoryEnabled, &QCheckBox::toggled, this, [this](bool enabled) {
         const auto category = currentCategory();

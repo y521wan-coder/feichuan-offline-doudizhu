@@ -13,6 +13,10 @@
 #include <QUrl>
 #include <QWebSocket>
 #include <QWidget>
+#include <memory>
+
+class QKeyEvent;
+class QListView;
 
 class QCheckBox;
 class QDialog;
@@ -20,14 +24,17 @@ class QLineEdit;
 class QListWidget;
 class QLabel;
 class QPushButton;
-class QSpinBox;
 class QStackedWidget;
 
 namespace fpdz {
 
+class CardTableWidget;
+class HandListModel;
+class OnlineWindowPlayTest;
+
 class OnlineWindow final : public QWidget {
 public:
-    explicit OnlineWindow(QWidget* parent = nullptr);
+    explicit OnlineWindow(QWidget* parent = nullptr, bool connectOnStart = true);
     ~OnlineWindow() override;
 
 protected:
@@ -36,6 +43,7 @@ protected:
     void closeEvent(QCloseEvent* event) override;
 
 private:
+    friend class OnlineWindowPlayTest;
     void buildUi();
     QWidget* buildLoginPage();
     QWidget* buildCountPage();
@@ -55,6 +63,15 @@ private:
     void refreshLobby(const QJsonArray& rooms);
     void refreshRoom(const QJsonObject& view);
     void refreshHand(const QJsonArray& ids);
+    void refreshTable();
+    void refreshSelection();
+    bool handleRoomKey(QKeyEvent* event);
+    void moveHandCursorTo(int row);
+    void takeCurrentCard();
+    void takeCurrentGroup();
+    void putDownCurrentCard();
+    void putDownAllCards();
+    void showHint();
     void navigateRoom(int direction);
     void joinSelectedRoom(const QString& invitationId = {});
     void leaveRoom();
@@ -90,9 +107,16 @@ private:
     QListWidget* lobbyList_ = nullptr;
     QLabel* roomStatus_ = nullptr;
     QListWidget* seatList_ = nullptr;
-    QListWidget* handList_ = nullptr;
+    std::unique_ptr<HandListModel> handModel_;
+    QListView* handView_ = nullptr;
+    CardTableWidget* cardTable_ = nullptr;
     QLabel* previewLabel_ = nullptr;
-    QSpinBox* bidSpin_ = nullptr;
+    QPushButton* bidButton_ = nullptr;
+    QPushButton* playButton_ = nullptr;
+    QPushButton* passButton_ = nullptr;
+    QPushButton* hintButton_ = nullptr;
+    QPointer<QDialog> bidDialog_;
+    QString lastBidPromptTurn_;
     QPointer<QDialog> chatDialog_;
     QListWidget* chatMessages_ = nullptr;
     QLineEdit* chatInput_ = nullptr;
@@ -115,7 +139,6 @@ private:
     QJsonArray recentMessages_;
     QStringList queuedChatAnnouncements_;
     QMap<QString, QString> pending_;
-    QSet<int> selectedCards_;
     AccessibilityService accessibility_;
     SoundService sound_;
 };
