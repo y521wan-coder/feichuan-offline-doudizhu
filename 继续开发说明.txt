@@ -2,16 +2,16 @@
 更新时间：2026-09-29
 项目目录：C:\Feichuan-Doudizhu
 开源仓库：https://github.com/y521wan-coder/feichuan-offline-doudizhu
-当前正式版本：2.4
+当前正式版本：2.5
 
 一、接手顺序与当前状态
 
 1. 先读 AGENTS.md、本文件、docs/架构说明.md、docs/规则规格.md、docs/在线2.3回归表.md、docs/测试与验收.md、docs/更新协议.md；AI 对战历史见 docs/AI对战模式交接计划.md，四人规则修订历史见 docs/2026-09-25-四人规则修订交接.md。
 2. 执行 git -c core.quotepath=false status --short、git log -12 --oneline、git diff --stat，并核对当前进程、构建产物、安装文件和更新服务器。不要只凭历史交接中的哈希判断现状，不得 reset、checkout、clean 丢弃工作区内容。
-3. 2.2 的正式产品提交为 9dab809、注解标签 v2.2；2.3 和 2.4 的产品提交、标签与推送状态见文末发布结果，并以 git log 最新结果为准。
+3. 2.2 的正式产品提交为 9dab809、注解标签 v2.2；2.3、2.4 和 2.5 的产品提交、标签与推送状态见文末发布结果，并以 git log 最新结果为准。
 4. 联机服务已在生产服务器上运行：Debian 12、专用普通账户 fpdz_online（无 sudo、无 docker 组）、rootless Podman pod `fpdz-online`、专用 PostgreSQL 15 容器、用户级 systemd 单元 `fpdz-online.service`，只绑定 127.0.0.1:19643，公网入口是 Nginx 的 https://play.327802521.xyz/ws 。
 
-二、联机版功能与 2.4 变更
+二、联机版功能与 2.4、2.5 变更
 
 1. 启动页新增第三个按钮“在线真人版”，与“离线单机版”“AI 对战模式”并列。Tab、Shift+Tab、回车可完成全部选择；前两个模式的入口、窗口、规则、AI、设置、存档、声音、快捷键和更新器行为不变。
 2. 在线真人版是独立 Windows 程序 `飞船斗地主在线版.exe`，由主程序启动并在其退出后恢复模式选择页。它只保存服务端发来的公开房间视图、本家手牌和房内最近 20 条纯文本消息，不创建 GameEngine、GameState 或 FullGameState；选牌预览用现有 PatternAnalyzer 本地完成，最终动作由服务端判定。
@@ -25,16 +25,18 @@
 10. 2.4 修复二人、三人、四人大厅的 20 间房左右浏览顺序，固定按 01～20 循环；大厅数据刷新时保留当前选中房间，避免重复触发焦点朗读。真人版界面按钮的空格、主键盘回车和小键盘回车均可确认。
 11. F5 在线设置新增“邀请机器人补齐空位”：仅等待中的房主可用，一次填满当前房间的剩余席位；二、三、四人房均允许任意一名或多名真人与其余机器人共同开局。房主仍按 F1 开战；房间没有真人后会清理机器人席位。机器人参与的局显示结算，但不计入真人账号战绩。
 12. 主动邀请的机器人在独立联机服务进程中复用现有单机版 StandardAiPlayer 的初级全知逻辑，只通过 AiObservation 接收完整观察，服务端仍负责发牌、规则和动作校验；暗牌不发送给客户端。无需云模型或模型网络请求，但真人动作仍通过正常联机连接到服务端。原超时和断线托管继续使用非全知观察，不改成全知。
+13. 2.5 真人联机的对局操作复用单机版 HandListModel、HandView 和 CardTableWidget：左右键浏览、上下键选放牌、Ctrl 组合选牌、回车出牌、Ctrl+回车过牌等行为与单机一致。轮到本家叫分时自动弹出“不叫／一分／二分／三分”选择；房主仍按 F1 开战，F2～F5 等在线专属功能保留。真人联机的发牌、判牌、计时和机器人动作仍由联机服务端负责，不把暗牌传给客户端。
 
 三、构建、测试与限制
 
-1. 固定开发环境：C:\Feichuan-Doudizhu，Qt 6.8.3 msvc2022_64（含 WebSockets）、CMake、Ninja、MSVC x64。增量构建 .\tools\build.ps1 -Preset release-x64 -Build；正式发布构建 .\tools\build_release.ps1 -Package。
+1. 固定开发环境：C:\Feichuan-Doudizhu。Win10/11 分支为 Qt 6.8.3 msvc2022_64、VS2026；Win7 SP1/Win8/Win8.1 分支为 Qt 5.15.2 msvc2019_64、VS2019 v142；均用 CMake、Ninja、MSVC x64。各自增量构建用 .\tools\build.ps1 -Preset release-x64 -Build 或 -Preset win7-x64 -Build；正式双分支发布构建用 .\tools\build_release.ps1 -Package。
 2. 2.3 Release 全量构建与 CTest 为 22/22 通过（179.84 秒），含新增 test_online_storage；签名恢复字段与旧存档兼容有针对性测试；dumpbin /dependents 确认主程序没有 QtNetwork/WebSockets 依赖。
 3. 2.3 联机协议端到端测试 python tools\online_formal_test.py --uri ws://127.0.0.1:<端口>/ws （只接受回环地址，会创建测试账号和房间）13 组全部通过；对正式服务复测时经 ssh -L 隧道指向服务器回环端口。
 4. 容量测试 python tools\online_formal_load.py --uri wss://play.327802521.xyz/ws --connect-host <服务器IP> --minutes 30 --rooms 38 --exercise-paths，结果与原始文件见 docs/在线2.3回归表.md。注意：测试脚本把注册/登录限并发（服务端 Argon2id 在事件循环内执行），对局阶段仍是满并发。
-5. 已知限制：第二家运营商复测按用户指示未执行；四种读屏的联机听感未人工验收；表情音效成品等用户提供；服务端注册哈希未移到工作线程。
-6. 原主程序、core、ai、原 ui 不链接 Qt Network；只有更新器、独立 AI 服务和独立在线程序联网。在线程序使用 Qt WebSockets，安装包必须携带 Qt6WebSockets.dll、Qt6Network.dll 和 tls/qschannelbackend.dll。
+5. 已知限制：第二家运营商复测按用户指示未执行；表情音效成品等用户提供；服务端注册哈希未移到工作线程。真人联机四种读屏的专项人工听感测试按用户 2026-09-29 决定免做，不列为待验收项；实际使用中有具体问题再修复。
+6. 原主程序、core、ai、原 ui 不链接 Qt Network；只有更新器、独立 AI 服务和独立在线程序联网。在线程序使用 Qt WebSockets。2.5 安装包根目录为 Win10/11 的 Qt6 运行库，win7 子目录为 Win7 SP1～Win8.1 的 Qt5、OpenSSL 1.1.1w 和独立四个 EXE；根目录同名启动器由 VS2019 构建，按系统版本选择分支。桌面快捷方式继续指向根目录 飞船斗地主.exe。Win7 分支的 Qt5 与 OpenSSL 1.1.1 已过公开维护期，来源及许可证见 third_party/qt5_win7/ORIGIN.md 和 third_party/openssl_win7/ORIGIN.md。
 7. 2.4 正式 Release 构建和 CTest 23/23 通过（184.02 秒）；新增 test_online_lobby 验证三种人数排序和空格/两种回车。隔离的回环联机服务上运行 python tools/online_bot_test.py，6 组通过，覆盖二/三/四人机器人补位、机器人行动、两真人与三真人混合、房主继任和房间清理。2.4 未重新执行 30 分钟容量测试，也未完成人工读屏听感验收；不要把 2.3 的容量结论写成 2.4 的实测结果。
+8. 2.5 现代分支和 Win7 兼容分支分别完成 Release 构建及 CTest 24/24；最终打包时 Win7 分支一个主窗口测试曾无输出失败，单独复跑该目标 117/117 通过，复用已验证的构建产物打包。Win10 上的 Qt5 分支验证 HTTPS 200、WSS 握手和隐藏启动；Win7 SP1 实机结果待用户朋友反馈。2.5 未重新执行 30 分钟容量测试；四种读屏专项人工听感测试已按用户决定免做。
 
 四、联机服务与部署状态
 
@@ -46,12 +48,13 @@
 6. 数据库：联机数据库 fpdz_online 与更新服务数据库完全分开；账号、会话、60 间固定房与席位、进行中快照、请求去重记录、结算结果和按人数分开的战绩都在联机库里。完成一局后删除含暗牌的快照。
 7. 常用排障：--diagnostics 子命令打印只读 JSON（构建版本、库连接、60 间房状态与修订号、账号/会话/结算计数）；容器日志里有 online_diagnostic（每分钟连接数、正在对局的房间、暂停房间、错误码计数）和 client_disconnect close_code=… seated=1。
 8. 2.4 联机服务镜像为 localhost/fpdz-online-production:2.4，使用原 rootless pod 和原数据库、原 Nginx 路由。2.3 镜像保留；生产启动脚本及 systemd 单元的切换前备份位于 /home/fpdz_online/online/backup-pre-2.4-20260929003156/。本轮只替换了联机服务容器与上述启动文件，未迁移数据库或修改更新服务容器。
+9. 2.5 仅更新客户端和更新发布服务；联机游戏服务仍运行 2.4，协议和数据库未改。
 
 五、正式发布与本机安装状态
 
-1. 当前安装包：releases/飞船斗地主-Setup-2.4.exe，62,294,805 字节，SHA-256 3A9CE7818DE40B35220D6BDD3608E7ED282D18E26B637A83F116DF2E813C72C9；固定公钥清单 releases/飞船斗地主-Setup-2.4.release-manifest.json，签名密钥 ID 898098f7c562190b1bae909422cf7b5ef09a34bc3e400110fa18cc65a77ff81a。安装包包含主程序、AI 服务、更新器、在线程序及联机所需 Qt DLL/插件。
-2. 更新服务器与 GitHub 的状态见文末“2.4 发布结果”；发布前已确认远端未占用 2.4。
-3. 本轮没有运行安装器、没有修改注册表或用户数据目录；本机安装目录仅备份并替换四个 EXE 内核，逐个 SHA-256 与 Release 构建产物一致。注册表中的安装版本号可能仍为旧值，不能把本机说成运行过 2.4 安装器。
+1. 当前安装包：releases/飞船斗地主-Setup-2.5.exe，119,405,454 字节，SHA-256 CEAAD9680336C35A850C363DAC574A32A7A778A7E0ADCBA9AA99CB1850149F34；固定公钥清单 releases/飞船斗地主-Setup-2.5.release-manifest.json，签名密钥 ID 898098f7c562190b1bae909422cf7b5ef09a34bc3e400110fa18cc65a77ff81a。安装包包含 Qt6 现代分支、Qt5 Win7 兼容分支、各自运行库和根目录系统版本启动器。
+2. 更新服务器与 GitHub 的状态见文末“2.5 发布结果”；发布前已确认远端未占用 2.5。
+3. 本轮没有运行安装器、没有修改注册表或用户数据目录；本机安装目录备份后更新根目录启动器，新增现代版 EXE，并更新 AI 服务、更新器和在线版共五个 EXE，逐个 SHA-256 与 Release 暂存产物一致；所需 Qt6 DLL/插件也与暂存产物一致。桌面快捷方式仍指向安装目录根目录启动器，隐藏启动验证进入 2.5 现代版。注册表中的安装版本号可能仍为旧值，不能把本机说成运行过 2.5 安装器。
 
 六、后续开发原则与不可变边界
 
@@ -63,9 +66,9 @@
 
 七、下一步
 
-1. 等待用户试玩 2.4：二/三/四人大厅 01～20 顺序、重复入大厅读屏、空格与回车确认、F5 机器人补位、真人和机器人混合牌局、结算不计战绩；并继续反馈登录、密码房、邀请、消息、回合时限、断线重连和托管手感。
+1. 用户试玩 2.5 真人和机器人混合牌局时，如发现单机版与在线版的具体操作差异或联机问题，按反馈修复。Win7 SP1 实机安装、登录和对局由用户的 Win7 朋友测试，收集具体报错；本机 Win10 兼容分支验证不等同于 Win7 实机通过。
 2. 用户制作好表情音效后，在在线设置里逐个导入；表情编号目前固定为 1～8（微笑、大笑、鼓掌、加油、惊讶、无奈、鲜花、鸡蛋），如需增加表情要与服务端编号同步。
-3. 四种读屏在联机过程中的真实听感需要用户和伙伴上线后反馈；第二家运营商网络复测已按用户指示取消，记为未执行。
+3. 真人联机四种读屏的专项人工听感测试按用户决定免做，不等待确认；实际使用中发现具体问题再修复。第二家运营商网络复测已按用户指示取消，记为未执行。
 4. 可选的后续优化：把服务端 Argon2id 哈希移到受限工作线程，避免大批量注册时的排队；为在线客户端补一套可自动化的协议级 UI 回归。
 
 发布结果（2026-09-27 完成）
@@ -85,3 +88,12 @@
 - GitHub：产品提交 12f4fb7f1b15f84e53ab4fc719ae151e27094d92 已推送至 main；注解标签 v2.4 的标签对象 50c990cfa94d6d1d6bab282d9fa3a32775a85748 已推送并指向该产品提交。本文件的交接更新提交紧随其后，以 git log 为准。
 - 本机安装目录 C:\Program Files\飞船斗地主 仅替换四个 EXE：飞船斗地主.exe、飞船斗地主AI服务.exe、飞船斗地主更新器.exe、飞船斗地主在线版.exe；旧版备份在 build/release-x64/install-trial-backup-20260929-2.4-release/。四个安装文件的 SHA-256 均与 Release 构建产物一致；未运行安装器、未动注册表或用户数据。
 - 验证范围：Release 全量构建与 CTest 23/23、隔离服务机器人协议测试 6 组通过。2.4 没有做 30 分钟容量测试或真人与读屏软件的人工听感测试。
+
+2.5 发布结果（2026-09-29 完成）
+
+- 联机服务：仍为 2.4 原有生产容器；本轮客户端操作和 Windows 兼容性改动不涉及联机服务部署、数据库或 Nginx。
+- 安装包与签名：releases/飞船斗地主-Setup-2.5.exe，119,405,454 字节，SHA-256 CEAAD9680336C35A850C363DAC574A32A7A778A7E0ADCBA9AA99CB1850149F34；固定公钥清单 releases/飞船斗地主-Setup-2.5.release-manifest.json，密钥 ID 898098f7c562190b1bae909422cf7b5ef09a34bc3e400110fa18cc65a77ff81a。
+- 更新服务器：Release ID 79、windows/stable/2.5、status=published；服务器回下载的大小、SHA-256 和签名字段与本地清单一致，publish_update.py 输出 SERVER_VERIFICATION=OK。
+- GitHub：产品提交 79be930c0296393ad42d6a7cb6a3d80c2135ed86 已推送至 main；注解标签 v2.5 的标签对象 bb3489c7ba0f4ecb3c60ebd039350031ab09d502 已推送并指向该产品提交。本文件的交接更新提交紧随其后，以 git log 为准。
+- 本机安装目录 C:\Program Files\飞船斗地主 备份并替换根目录飞船斗地主.exe、飞船斗地主AI服务.exe、飞船斗地主更新器.exe、飞船斗地主在线版.exe，新增飞船斗地主现代版.exe；旧文件备份在 build/release-x64/install-trial-backup-20260929-2.5-release/。五个 EXE 哈希均与暂存产物一致，桌面快捷方式 C:\Users\apple007\Desktop\飞船斗地主.lnk 指向根目录启动器，隐藏启动进入文件版本 2.5.0.0 的现代版。未运行安装器、未修改注册表或用户数据。
+- 验证范围：Qt6/VS2026 和 Qt5/VS2019 两个 Release 分支 CTest 各 24/24；最终打包时 Win7 分支一个 UI 测试偶发无输出失败，单独复跑 117/117 通过；Qt5 分支在 Win10 上验证 HTTPS、WSS、无 CreateDXGIFactory2 静态导入和启动。Win7 SP1 实机未测试，留给用户朋友试玩反馈。四种读屏专项人工听感测试按用户决定免做。
